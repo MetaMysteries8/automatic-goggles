@@ -70,42 +70,131 @@ jobs:
           $dll = "$root\dist\keyboardvr\bin\win64\driver_keyboardvr.dll"
           if (-not (Test-Path $exe)) { throw "Missing KeyboardVR.exe" }
           if (-not (Test-Path $dll)) { throw "Missing driver_keyboardvr.dll" }
-          Write-Host "KeyboardVR.exe:" (Get-Item $exe).Length "bytes"
-          Write-Host "driver_keyboardvr.dll:" (Get-Item $dll).Length "bytes"
 
-      - name: Package ready-to-run build
+      - name: Package simple ready-to-run build
         shell: pwsh
         run: |
           $src = "$PWD\v2src\KeyboardVR"
-          $out = "$PWD\package\KeyboardVR-v2"
+          $out = "$PWD\package\KeyboardVR-v2.1"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Copy-Item -Recurse -Force "$src\dist\*" $out
-          foreach ($file in @("install.ps1","uninstall.ps1","run.ps1","diagnose.ps1","README.md")) {
-            Copy-Item "$src\$file" "$out\$file"
-          }
-          if (Test-Path "$src\scripts") {
-            Copy-Item -Recurse "$src\scripts" "$out\scripts"
-          }
-          Compress-Archive -Path "$out\*" -DestinationPath "$PWD\package\KeyboardVR-v2-Windows-x64.zip" -Force
+
+          # Keep the built EXE and SteamVR driver directly at the top level.
+          Copy-Item "$src\dist\KeyboardVR.exe" "$out\KeyboardVR.exe"
+          Copy-Item -Recurse "$src\dist\keyboardvr" "$out\keyboardvr"
+
+          $install = @'
+          @echo off
+          setlocal
+          title KeyboardVR Driver Installer
+
+          set "DRIVER=%~dp0keyboardvr"
+          if not exist "%DRIVER%\driver.vrdrivermanifest" (
+            echo ERROR: keyboardvr driver folder is missing.
+            pause
+            exit /b 1
+          )
+
+          set "VRPATH=%ProgramFiles(x86)%\Steam\steamapps\common\SteamVR\bin\win64\vrpathreg.exe"
+          if exist "%VRPATH%" goto found
+
+          for /f "tokens=2,*" %%A in ('reg query "HKCU\Software\Valve\Steam" /v SteamPath 2^>nul ^| find /i "SteamPath"') do set "STEAMPATH=%%B"
+          if defined STEAMPATH set "VRPATH=%STEAMPATH%\steamapps\common\SteamVR\bin\win64\vrpathreg.exe"
+
+          :found
+          if not exist "%VRPATH%" (
+            echo ERROR: Could not find SteamVR's vrpathreg.exe.
+            echo Make sure SteamVR is installed, then try again.
+            pause
+            exit /b 1
+          )
+
+          echo Installing KeyboardVR SteamVR driver...
+          "%VRPATH%" removedriver "%DRIVER%" >nul 2>nul
+          "%VRPATH%" adddriver "%DRIVER%"
+          if errorlevel 1 (
+            echo.
+            echo ERROR: SteamVR driver registration failed.
+            pause
+            exit /b 1
+          )
+
+          echo.
+          echo KeyboardVR driver installed.
+          echo.
+          echo Next:
+          echo   1. Run KeyboardVR.exe
+          echo   2. Start SteamVR
+          echo.
+          pause
+          '@
+          [IO.File]::WriteAllText("$out\Install Driver.bat", $install.Trim(), [Text.Encoding]::ASCII)
+
+          $uninstall = @'
+          @echo off
+          setlocal
+          title KeyboardVR Driver Uninstaller
+
+          set "DRIVER=%~dp0keyboardvr"
+          set "VRPATH=%ProgramFiles(x86)%\Steam\steamapps\common\SteamVR\bin\win64\vrpathreg.exe"
+          if exist "%VRPATH%" goto found
+
+          for /f "tokens=2,*" %%A in ('reg query "HKCU\Software\Valve\Steam" /v SteamPath 2^>nul ^| find /i "SteamPath"') do set "STEAMPATH=%%B"
+          if defined STEAMPATH set "VRPATH=%STEAMPATH%\steamapps\common\SteamVR\bin\win64\vrpathreg.exe"
+
+          :found
+          if not exist "%VRPATH%" (
+            echo ERROR: Could not find SteamVR's vrpathreg.exe.
+            pause
+            exit /b 1
+          )
+
+          "%VRPATH%" removedriver "%DRIVER%"
+          echo.
+          echo KeyboardVR driver uninstalled.
+          pause
+          '@
+          [IO.File]::WriteAllText("$out\Uninstall Driver.bat", $uninstall.Trim(), [Text.Encoding]::ASCII)
+
+          $readme = @'
+          KeyboardVR - Simple Windows Build
+
+          First setup:
+            1. Close SteamVR if it is open.
+            2. Double-click "Install Driver.bat".
+            3. Double-click KeyboardVR.exe.
+            4. Start SteamVR.
+
+          Normal use after installation:
+            1. Run KeyboardVR.exe.
+            2. Start SteamVR.
+
+          To remove the virtual driver:
+            Double-click "Uninstall Driver.bat".
+
+          No PowerShell scripts or build tools are required for this release.
+          '@
+          [IO.File]::WriteAllText("$out\README.txt", $readme.Trim(), [Text.Encoding]::UTF8)
+
+          Compress-Archive -Path "$out\*" -DestinationPath "$PWD\package\KeyboardVR-v2.1-Windows-x64.zip" -Force
 
       - name: Upload Windows x64 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KeyboardVR-v2-Windows-x64
-          path: package/KeyboardVR-v2-Windows-x64.zip
+          name: KeyboardVR-v2.1-Windows-x64
+          path: package/KeyboardVR-v2.1-Windows-x64.zip
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish/update v0.2.0 release
+      - name: Publish/update v0.2.1 release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $zip = (Resolve-Path 'package/KeyboardVR-v2-Windows-x64.zip').Path
-          gh release view v0.2.0 --repo $env:GITHUB_REPOSITORY 2>$null
+          $zip = (Resolve-Path 'package/KeyboardVR-v2.1-Windows-x64.zip').Path
+          gh release view v0.2.1 --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload v0.2.0 "$zip" --clobber --repo $env:GITHUB_REPOSITORY
+            gh release upload v0.2.1 "$zip" --clobber --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create v0.2.0 "$zip" --repo $env:GITHUB_REPOSITORY --target "$env:GITHUB_SHA" --title "KeyboardVR v2" --notes "Prebuilt Windows x64 KeyboardVR v2 with SteamVR virtual HMD/controllers, DualSense/gamepad input, mouse/touchpad head control, rig visualizer, and virtual room setup." --latest
+            gh release create v0.2.1 "$zip" --repo $env:GITHUB_REPOSITORY --target "$env:GITHUB_SHA" --title "KeyboardVR v2.1 - Simple Build" --notes "Prebuilt Windows x64 release with the simple workflow restored: install driver, run KeyboardVR.exe, start SteamVR. No PowerShell or local build step required." --latest
           }
