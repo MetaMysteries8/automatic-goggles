@@ -68,12 +68,12 @@ Gamepad:
 - L3/R3 — corresponding virtual thumbstick click
 - DualSense touchpad drag — head yaw/pitch
 
-## Source
+## Source and CI
 
-The exact v2 source used by CI is stored at:
+The v2 source archive used by CI is stored losslessly as six base64 chunks under `ci/v2.part1.b64` through `ci/v2.part6.b64`. The workflow reconstructs the ZIP and verifies this SHA-256 before it is allowed to build:
 
-`source/KeyboardVR-Windows-SteamVR-v2.zip`
+`392ddafc189caf079820f7dbb18b05c5dc9ce0915d6a39a069d0a4697ed00fe8`
 
-The build workflow unpacks that source, builds the Windows x64 EXE and SteamVR driver DLL with MSVC/CMake, packages them, uploads the Actions artifact, and publishes/updates the v0.2.0 GitHub Release.
+The Windows workflow then applies the small MSVC compatibility cast required by the rig visualizer, builds the x64 EXE and SteamVR driver DLL with CMake/MSVC, verifies both binaries, packages them, uploads an Actions artifact, and publishes/updates the v0.2.0 GitHub Release.
 
 The older browseable root source is retained temporarily as the original prototype snapshot.
