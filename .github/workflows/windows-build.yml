@@ -17,18 +17,30 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Reconstruct KeyboardVR v2 source
+      - name: Reconstruct and verify KeyboardVR v2 source
         shell: pwsh
         run: |
-          $parts = 1..6 | ForEach-Object {
+          $part1 = (0..10 | ForEach-Object {
+            $n = $_.ToString("00")
+            (Get-Content "ci/v2.part1.$n.txt" -Raw).Trim()
+          }) -join ''
+
+          $tail = (2..6 | ForEach-Object {
             (Get-Content "ci/v2.part$_.b64" -Raw).Trim()
+          }) -join ''
+
+          $encoded = $part1 + $tail
+          $zip = "$PWD\KeyboardVR-v2-source.zip"
+          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($encoded))
+
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = "392ddafc189caf079820f7dbb18b05c5dc9ce0915d6a39a069d0a4697ed00fe8"
+          Write-Host "Source SHA256: $hash"
+          if ($hash -ne $expected) {
+            throw "KeyboardVR v2 source checksum mismatch. Expected $expected, got $hash."
           }
-          $encoded = $parts -join ''
-          [IO.File]::WriteAllBytes(
-            "$PWD\KeyboardVR-v2-source.zip",
-            [Convert]::FromBase64String($encoded)
-          )
-          Expand-Archive -Path "$PWD\KeyboardVR-v2-source.zip" -DestinationPath "$PWD\v2src" -Force
+
+          Expand-Archive -Path $zip -DestinationPath "$PWD\v2src" -Force
           if (-not (Test-Path "$PWD\v2src\KeyboardVR\CMakeLists.txt")) {
             throw "KeyboardVR v2 source reconstruction failed."
           }
@@ -65,6 +77,9 @@ jobs:
           Copy-Item -Recurse -Force "$src\dist\*" $out
           foreach ($file in @("install.ps1","uninstall.ps1","run.ps1","diagnose.ps1","README.md")) {
             Copy-Item "$src\$file" "$out\$file"
+          }
+          if (Test-Path "$src\scripts") {
+            Copy-Item -Recurse "$src\scripts" "$out\scripts"
           }
           Compress-Archive -Path "$out\*" -DestinationPath "$PWD\package\KeyboardVR-v2-Windows-x64.zip" -Force
 
