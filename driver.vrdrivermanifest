@@ -1,0 +1,7 @@
+{
+  "alwaysActivate": true,
+  "name": "vrkbd",
+  "directory": "",
+  "resourceOnly": false,
+  "hmd_presence": ["VRKBD-HMD-001"]
+}

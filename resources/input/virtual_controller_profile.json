@@ -1,0 +1,15 @@
+{
+  "jsonid": "input_profile",
+  "controller_type": "vrkbd_controller",
+  "device_class": "TrackedDeviceClass_Controller",
+  "input_bindingui_mode": "controller_handed",
+  "input_source": {
+    "/input/system": { "type": "button" },
+    "/input/application_menu": { "type": "button" },
+    "/input/a": { "type": "button" },
+    "/input/b": { "type": "button" },
+    "/input/trigger": { "type": "trigger" },
+    "/input/grip": { "type": "trigger" },
+    "/input/joystick": { "type": "joystick" }
+  }
+}

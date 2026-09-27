@@ -1,0 +1,39 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          $root = 'dist/VRKeyboardEmulator'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Copy-Item -Recurse 'build/vrkbd' "$root/vrkbd"
+          Copy-Item 'build/app/vrkbd_controller.exe' "$root/vrkbd_controller.exe"
+          Copy-Item 'install_driver.bat' "$root/install_driver.bat"
+          Copy-Item 'uninstall_driver.bat' "$root/uninstall_driver.bat"
+          Copy-Item 'README.md' "$root/README.md"
+
+      - name: Upload Windows x64 build
+        uses: actions/upload-artifact@v4
+        with:
+          name: VRKeyboardEmulator-Windows-x64
+          path: dist/VRKeyboardEmulator
+          if-no-files-found: error
