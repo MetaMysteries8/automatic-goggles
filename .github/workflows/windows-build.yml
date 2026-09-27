@@ -1,9 +1,8 @@
-name: Windows Build
+name: KeyboardVR v2 Windows Build
 
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -14,26 +13,71 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Configure
-        run: cmake -S . -B build -A x64
-
-      - name: Build
-        run: cmake --build build --config Release --parallel
-
-      - name: Stage artifact
+      - name: Reconstruct KeyboardVR v2 source package
         shell: pwsh
         run: |
-          $root = 'dist/VRKeyboardEmulator'
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
-          Copy-Item -Recurse 'build/vrkbd' "$root/vrkbd"
-          Copy-Item 'build/app/vrkbd_controller.exe' "$root/vrkbd_controller.exe"
-          Copy-Item 'install_driver.bat' "$root/install_driver.bat"
-          Copy-Item 'uninstall_driver.bat' "$root/uninstall_driver.bat"
-          Copy-Item 'README.md' "$root/README.md"
+          $parts = 1..6 | ForEach-Object {
+            (Get-Content "ci/v2.part$_.b64" -Raw).Trim()
+          }
+          $encoded = $parts -join ''
+          [IO.File]::WriteAllBytes(
+            "$PWD\KeyboardVR-Windows-SteamVR-v2.zip",
+            [Convert]::FromBase64String($encoded)
+          )
+          Expand-Archive -Path "$PWD\KeyboardVR-Windows-SteamVR-v2.zip" -DestinationPath "$PWD\v2src" -Force
+          if (-not (Test-Path "$PWD\v2src\KeyboardVR\CMakeLists.txt")) {
+            throw "KeyboardVR v2 source reconstruction failed."
+          }
 
-      - name: Upload Windows x64 build
+      - name: Configure KeyboardVR v2
+        shell: pwsh
+        run: |
+          cmake -S "$PWD\v2src\KeyboardVR" -B "$PWD\v2src\KeyboardVR\build" -A x64
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
+
+      - name: Build KeyboardVR v2
+        shell: pwsh
+        run: |
+          cmake --build "$PWD\v2src\KeyboardVR\build" --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Build failed." }
+
+      - name: Verify binaries
+        shell: pwsh
+        run: |
+          $root = "$PWD\v2src\KeyboardVR"
+          $exe = "$root\dist\KeyboardVR.exe"
+          $dll = "$root\dist\keyboardvr\bin\win64\driver_keyboardvr.dll"
+          if (-not (Test-Path $exe)) { throw "Missing built KeyboardVR.exe" }
+          if (-not (Test-Path $dll)) { throw "Missing built driver_keyboardvr.dll" }
+          Write-Host "KeyboardVR.exe:" (Get-Item $exe).Length "bytes"
+          Write-Host "driver_keyboardvr.dll:" (Get-Item $dll).Length "bytes"
+
+      - name: Stage full built package
+        shell: pwsh
+        run: |
+          $src = "$PWD\v2src\KeyboardVR"
+          $pkg = "$PWD\package\KeyboardVR-Windows-SteamVR-v2-BUILT"
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+
+          Copy-Item "$src\dist\KeyboardVR.exe" "$pkg\KeyboardVR.exe"
+          Copy-Item -Recurse "$src\dist\keyboardvr" "$pkg\keyboardvr"
+
+          foreach ($file in @("install.ps1","uninstall.ps1","run.ps1","diagnose.ps1","README.md")) {
+            if (Test-Path "$src\$file") {
+              Copy-Item "$src\$file" "$pkg\$file"
+            }
+          }
+
+          if (Test-Path "$src\scripts") {
+            Copy-Item -Recurse "$src\scripts" "$pkg\scripts"
+          }
+
+          Copy-Item "$PWD\KeyboardVR-Windows-SteamVR-v2.zip" "$pkg\KeyboardVR-v2-source.zip"
+
+      - name: Upload KeyboardVR v2 full Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: VRKeyboardEmulator-Windows-x64
-          path: dist/VRKeyboardEmulator
+          name: KeyboardVR-Windows-SteamVR-v2-BUILT
+          path: package/KeyboardVR-Windows-SteamVR-v2-BUILT
           if-no-files-found: error
+          retention-days: 90
