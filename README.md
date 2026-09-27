@@ -1,120 +1,79 @@
-# VR Keyboard Emulator
+# KeyboardVR v2
 
-A Windows SteamVR/OpenVR proof-of-concept that lets you drive a virtual VR setup without a physical headset.
+KeyboardVR is a Windows SteamVR virtual-device driver for using VR software without a physical VR headset.
 
-The SteamVR driver exposes:
+## v2 adds
 
-- a virtual HMD
-- a virtual left controller
-- a virtual right controller
+- virtual SteamVR HMD + left/right controllers
+- live top/front/side VR rig visualizer
+- PS5 DualSense and standard gamepad input through SDL3
+- left stick -> left hand movement
+- right stick -> right hand movement
+- DualSense touchpad drag -> head look
+- right-mouse drag -> head look
+- keyboard pose editing
+- virtual 4 m x 4 m standing/chaperone universe so SteamVR can skip the normal Room Setup flow
+- Index/Knuckles-compatible controller rebinding fallback
 
-A separate Windows controller app writes head, hand, button, trigger, grip, and joystick state into shared memory. The SteamVR driver reads that state and reports it to SteamVR as tracked devices.
+## Download the prebuilt Windows version
 
-## Current controls
+You do **not** need to compile it yourself.
 
-### Select a device
+Open **Releases** and download:
 
-- `1` / `F1` — head
-- `2` / `F2` — left hand
-- `3` / `F3` — right hand
+`KeyboardVR-v2-Windows-x64.zip`
 
-### Pose controls
-
-- `WASD` — move horizontally
-- `Q` / `E` — down / up
-- Arrow keys — yaw / pitch
-- `Z` / `X` — roll
-- `Shift` — faster movement
-- `R` — reset selected device
-
-### Controller input
-
-When either hand is selected:
-
-- `Space` — trigger
-- `Ctrl` — grip
-- `F` — primary button
-- `G` — secondary button
-- `Tab` — menu
-- `C` — stick click
-- `I/J/K/L` — joystick
-
-## Automated Windows builds
-
-GitHub Actions builds the project on Windows x64 on pushes and pull requests. You can also start a build manually from **Actions → Windows Build → Run workflow**.
-
-The workflow uploads a `VRKeyboardEmulator-Windows-x64` artifact containing the virtual SteamVR driver, controller executable, install/uninstall scripts, and this README.
-
-## Local build
-
-Requirements:
-
-- Windows 10/11 x64
-- Steam + SteamVR
-- Visual Studio 2022 Build Tools with **Desktop development with C++**
-- CMake
-- Git
-
-Run:
-
-```bat
-build.bat
-```
-
-Outputs:
-
-- `build/vrkbd/` — SteamVR driver
-- `build/app/vrkbd_controller.exe` — keyboard controller
+A fresh build is also attached to every successful **Build KeyboardVR for Windows** workflow run under the Actions tab.
 
 ## Install
 
-1. Close SteamVR.
-2. Run `install_driver.bat`.
-3. Run `vrkbd_controller.exe` from a packaged build, or `build\app\vrkbd_controller.exe` from a local build.
-4. Start SteamVR.
-5. Use SteamVR VR View or the game's desktop mirror as the display.
+1. Extract the Windows ZIP.
+2. Fully close SteamVR.
+3. Open PowerShell in the extracted folder.
+4. Run:
 
-The install script currently looks for SteamVR in the normal Steam install location.
-
-## Architecture
-
-```text
-Keyboard
-   |
-   v
-vrkbd_controller.exe
-   |
-   | Windows named shared memory
-   v
-driver_vrkbd.dll
-   |
-   v
-vrserver.exe / SteamVR
-   |
-   +-- Virtual HMD
-   +-- Virtual left controller
-   +-- Virtual right controller
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+.\run.ps1
 ```
 
-## Current limitations
+If SteamVR still says no headset is connected, run:
 
-This is an early MVP, not a complete universal VR compatibility layer.
+```powershell
+.\diagnose.ps1
+```
 
-- rigid controller poses only; skeletal finger input is not implemented yet
-- no dedicated compositor/mirror application yet
-- bindings may need adjustment for games expecting a particular controller profile
-- some games perform headset/vendor-specific checks beyond ordinary SteamVR tracking
-- native OpenXR titles depend on SteamVR being their active OpenXR runtime
+## Controls
 
-## Planned upgrades
+Keyboard:
 
-- mouse-controlled head look
-- simultaneous independent left/right hand controls
-- configurable controls and saved profiles
-- motion smoothing and interpolation
-- recenter, snap-turn, and smooth-turn modes
-- skeletal hand/finger simulation
-- gamepad controls
-- virtual waist/foot trackers
-- desktop VR camera window
-- stronger OpenXR compatibility
+- `1 / 2 / 3` — head / left hand / right hand
+- `WASD` — move selected device
+- `R/F` — up/down
+- arrows — yaw/pitch
+- `Z/X` — roll
+- right mouse drag — head look
+- `G` — rig-follow
+- `F1` — reset rig
+- `F2` — reset selected device
+- `F3` — show/hide visualizer
+
+Gamepad:
+
+- left stick — left virtual hand X/Z
+- right stick — right virtual hand X/Z
+- L2/R2 — left/right trigger
+- L1/R1 — left/right grip
+- L3/R3 — corresponding virtual thumbstick click
+- DualSense touchpad drag — head yaw/pitch
+
+## Source
+
+The exact v2 source used by CI is stored at:
+
+`source/KeyboardVR-Windows-SteamVR-v2.zip`
+
+The build workflow unpacks that source, builds the Windows x64 EXE and SteamVR driver DLL with MSVC/CMake, packages them, uploads the Actions artifact, and publishes/updates the v0.2.0 GitHub Release.
+
+The older browseable root source is retained temporarily as the original prototype snapshot.

@@ -1,9 +1,13 @@
-name: KeyboardVR v2 Windows Build
+name: Build KeyboardVR for Windows
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -13,71 +17,51 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Reconstruct KeyboardVR v2 source package
+      - name: Unpack KeyboardVR v2 source
         shell: pwsh
         run: |
-          $parts = 1..6 | ForEach-Object {
-            (Get-Content "ci/v2.part$_.b64" -Raw).Trim()
-          }
-          $encoded = $parts -join ''
-          [IO.File]::WriteAllBytes(
-            "$PWD\KeyboardVR-Windows-SteamVR-v2.zip",
-            [Convert]::FromBase64String($encoded)
-          )
-          Expand-Archive -Path "$PWD\KeyboardVR-Windows-SteamVR-v2.zip" -DestinationPath "$PWD\v2src" -Force
-          if (-not (Test-Path "$PWD\v2src\KeyboardVR\CMakeLists.txt")) {
-            throw "KeyboardVR v2 source reconstruction failed."
-          }
+          New-Item -ItemType Directory -Force -Path work | Out-Null
+          Expand-Archive -LiteralPath source/KeyboardVR-Windows-SteamVR-v2.zip -DestinationPath work -Force
 
-      - name: Configure KeyboardVR v2
+      - name: Configure
+        shell: pwsh
+        run: cmake -S work/KeyboardVR -B build -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Package ready-to-run build
         shell: pwsh
         run: |
-          cmake -S "$PWD\v2src\KeyboardVR" -B "$PWD\v2src\KeyboardVR\build" -A x64
-          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
+          $src = Join-Path $PWD 'work/KeyboardVR'
+          $out = Join-Path $PWD 'package/KeyboardVR-v2'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item -Recurse -Force "$src/dist/*" $out
+          Copy-Item -Force "$src/install.ps1" "$out/install.ps1"
+          Copy-Item -Force "$src/uninstall.ps1" "$out/uninstall.ps1"
+          Copy-Item -Force "$src/run.ps1" "$out/run.ps1"
+          Copy-Item -Force "$src/diagnose.ps1" "$out/diagnose.ps1"
+          Copy-Item -Force "$src/README.md" "$out/README.md"
+          Compress-Archive -Path "$out/*" -DestinationPath package/KeyboardVR-v2-Windows-x64.zip -Force
 
-      - name: Build KeyboardVR v2
-        shell: pwsh
-        run: |
-          cmake --build "$PWD\v2src\KeyboardVR\build" --config Release --parallel
-          if ($LASTEXITCODE -ne 0) { throw "Build failed." }
-
-      - name: Verify binaries
-        shell: pwsh
-        run: |
-          $root = "$PWD\v2src\KeyboardVR"
-          $exe = "$root\dist\KeyboardVR.exe"
-          $dll = "$root\dist\keyboardvr\bin\win64\driver_keyboardvr.dll"
-          if (-not (Test-Path $exe)) { throw "Missing built KeyboardVR.exe" }
-          if (-not (Test-Path $dll)) { throw "Missing built driver_keyboardvr.dll" }
-          Write-Host "KeyboardVR.exe:" (Get-Item $exe).Length "bytes"
-          Write-Host "driver_keyboardvr.dll:" (Get-Item $dll).Length "bytes"
-
-      - name: Stage full built package
-        shell: pwsh
-        run: |
-          $src = "$PWD\v2src\KeyboardVR"
-          $pkg = "$PWD\package\KeyboardVR-Windows-SteamVR-v2-BUILT"
-          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
-
-          Copy-Item "$src\dist\KeyboardVR.exe" "$pkg\KeyboardVR.exe"
-          Copy-Item -Recurse "$src\dist\keyboardvr" "$pkg\keyboardvr"
-
-          foreach ($file in @("install.ps1","uninstall.ps1","run.ps1","diagnose.ps1","README.md")) {
-            if (Test-Path "$src\$file") {
-              Copy-Item "$src\$file" "$pkg\$file"
-            }
-          }
-
-          if (Test-Path "$src\scripts") {
-            Copy-Item -Recurse "$src\scripts" "$pkg\scripts"
-          }
-
-          Copy-Item "$PWD\KeyboardVR-Windows-SteamVR-v2.zip" "$pkg\KeyboardVR-v2-source.zip"
-
-      - name: Upload KeyboardVR v2 full Windows build
+      - name: Upload Windows x64 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KeyboardVR-Windows-SteamVR-v2-BUILT
-          path: package/KeyboardVR-Windows-SteamVR-v2-BUILT
+          name: KeyboardVR-v2-Windows-x64
+          path: package/KeyboardVR-v2-Windows-x64.zip
           if-no-files-found: error
-          retention-days: 90
+
+      - name: Publish/update v0.2.0 release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = (Resolve-Path 'package/KeyboardVR-v2-Windows-x64.zip').Path
+          gh release view v0.2.0 --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload v0.2.0 "$zip" --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create v0.2.0 "$zip" --repo $env:GITHUB_REPOSITORY --target "$env:GITHUB_SHA" --title "KeyboardVR v2" --notes "Prebuilt Windows x64 KeyboardVR v2 with SteamVR virtual HMD/controllers, DualSense/gamepad input, mouse/touchpad head control, rig visualizer, and virtual room setup." --latest
+          }
