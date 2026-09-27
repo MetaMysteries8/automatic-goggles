@@ -20,16 +20,10 @@ jobs:
       - name: Reconstruct and verify KeyboardVR v2 source
         shell: pwsh
         run: |
-          $part1 = (0..10 | ForEach-Object {
-            $n = $_.ToString("00")
-            (Get-Content "ci/v2.part1.$n.txt" -Raw).Trim()
-          }) -join ''
-
-          $tail = (2..6 | ForEach-Object {
+          $parts = 1..6 | ForEach-Object {
             (Get-Content "ci/v2.part$_.b64" -Raw).Trim()
-          }) -join ''
-
-          $encoded = $part1 + $tail
+          }
+          $encoded = $parts -join ''
           $zip = "$PWD\KeyboardVR-v2-source.zip"
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($encoded))
 
