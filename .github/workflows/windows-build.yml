@@ -21,15 +21,21 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path work | Out-Null
-          Expand-Archive -LiteralPath source/KeyboardVR-Windows-SteamVR-v2.zip -DestinationPath work -Force
+          tar -xf source/KeyboardVR-Windows-SteamVR-v2.zip -C work
+          if ($LASTEXITCODE -ne 0) { throw "Failed to unpack v2 source archive." }
+          if (-not (Test-Path "work/KeyboardVR/CMakeLists.txt")) { throw "CMakeLists.txt was not found after extraction." }
 
       - name: Configure
         shell: pwsh
-        run: cmake -S work/KeyboardVR -B build -A x64
+        run: |
+          cmake -S work/KeyboardVR -B build -A x64
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed." }
 
       - name: Build
         shell: pwsh
-        run: cmake --build build --config Release --parallel
+        run: |
+          cmake --build build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Build failed." }
 
       - name: Package ready-to-run build
         shell: pwsh
@@ -43,7 +49,8 @@ jobs:
           Copy-Item -Force "$src/run.ps1" "$out/run.ps1"
           Copy-Item -Force "$src/diagnose.ps1" "$out/diagnose.ps1"
           Copy-Item -Force "$src/README.md" "$out/README.md"
-          Compress-Archive -Path "$out/*" -DestinationPath package/KeyboardVR-v2-Windows-x64.zip -Force
+          tar -a -c -f package/KeyboardVR-v2-Windows-x64.zip -C package KeyboardVR-v2
+          if ($LASTEXITCODE -ne 0) { throw "Packaging failed." }
 
       - name: Upload Windows x64 artifact
         uses: actions/upload-artifact@v4
