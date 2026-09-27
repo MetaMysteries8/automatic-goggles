@@ -39,6 +39,17 @@ jobs:
             throw "KeyboardVR v2 source reconstruction failed."
           }
 
+      - name: Apply MSVC compatibility fixes
+        shell: pwsh
+        run: |
+          $controller = "$PWD\v2src\KeyboardVR\src\controller\main.cpp"
+          $text = Get-Content $controller -Raw
+          $old = 'const int panelW = std::max(100, (client.right - gap * 4) / 3);'
+          $new = 'const int panelW = std::max(100, (static_cast<int>(client.right) - gap * 4) / 3);'
+          if (-not $text.Contains($old)) { throw "Expected visualizer panel-width line not found." }
+          $text = $text.Replace($old, $new)
+          [IO.File]::WriteAllText($controller, $text)
+
       - name: Configure
         shell: pwsh
         run: |
