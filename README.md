@@ -1,10 +1,10 @@
-# KeyboardVR v3.4
+# KeyboardVR v3.5
 
 KeyboardVR is a Windows SteamVR virtual-device driver and desktop control bridge for using VR software without a physical VR headset.
 
 It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/mouse control, and supports real gamepads through SDL3 including PS5 DualSense touchpad head-look.
 
-## v3.4 highlights
+## v3.5 highlights
 
 - **Yaw/anchor fixes**
   - hand positions now use the same OpenVR +Y yaw convention as the HMD quaternion
@@ -14,23 +14,19 @@ It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/
   - switching directly between SnapTo and WalkSim also gets a clean hand reset
 
 
-- **GTAG WalkSim mode**: Options/Start toggles a controller-oriented locomotion mode intended for Gorilla Tag-style testing without real VR hardware.
-  - left stick = walk / strafe the whole virtual rig
-  - right stick X = turn
-  - right stick Y = raise/lower the rig (standing height / crouch-style control)
-  - D-pad up/down = extra vertical trim
-  - hands automatically alternate through a walking swing while moving
-  - **Cross/A = directional jump**
-    - left-stick direction at takeoff determines forward/backward/side/diagonal jump direction
-    - centered stick gives a mostly vertical hop
-  - **L3 held = sprint**
-    - increases ground speed
-    - increases jump horizontal impulse and slightly increases jump height
-  - **Circle/B = manual tag lunge**
-    - selected hand thrusts forward and returns
-    - if HEAD is selected, it defaults to the right hand
-    - this is pose-based and does not auto-detect opponents
-  - physical stick axes are not also forwarded as VR thumbstick locomotion in WalkSim, avoiding accidental double movement
+- **GTAG WalkSim mode — arm-driven**
+  - WalkSim does **not directly translate or rotate the HMD**
+  - left stick controls the direction of alternating synthetic arm pushes
+  - the contact half of each stroke moves a hand down and opposite the requested travel direction
+  - the recovery half brings that hand back up/forward for the next stroke
+  - Gorilla Tag (or another arm-locomotion title) is expected to move the body from its own hand-collision physics
+  - if the game moves the HMD/body, subsequent synthetic hand poses automatically follow the updated HMD
+  - **L3 held = sprint strokes**: faster cycle, longer push, deeper reach
+  - **Cross/A = directional jump push**: both hands shove downward together; left-stick direction biases the shove for forward/back/diagonal jumps
+  - **Circle/B = manual tag lunge** with the selected hand
+  - **right stick Y = hand-height trim**, so you can lower/raise the whole WalkSim stroke envelope without moving the head
+  - D-pad up/down also trims WalkSim hand height
+  - touchpad/mouse remain the head-look controls
 - **SnapTo mode**: Create/Back toggles absolute hand positioning.
   - each stick maps directly to a hand position around the HMD instead of accumulating movement over time
   - letting go of the stick returns that hand to its captured neutral anchor
@@ -62,7 +58,7 @@ It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/
 
 ## Install the prebuilt Windows release
 
-1. Extract `KeyboardVR-v3.4-Windows-x64.zip`.
+1. Extract `KeyboardVR-v3.5-Windows-x64.zip`.
 2. Fully close SteamVR.
 3. Double-click `Install Driver.bat`.
 4. Run `KeyboardVR.exe`.
@@ -97,4 +93,4 @@ Selected virtual-controller keyboard inputs:
 
 ## Notes about GTAG WalkSim
 
-WalkSim is implemented at the virtual tracking-rig layer: it moves the synthetic HMD/controllers and generates an automatic hand-swing pattern. It does not patch or modify Gorilla Tag itself. Because VR games differ in how they interpret tracked poses and locomotion, game-specific behavior can still need tuning.
+WalkSim now only synthesizes tracked hand poses. It intentionally does not fake player translation, jump arcs, crouching, or snap-turn movement at the HMD layer. Actual body movement depends on the game's own locomotion/collision code reacting to the virtual hands, so the exact stroke depth and timing may still need tuning against Gorilla Tag itself.
