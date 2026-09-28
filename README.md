@@ -1,10 +1,10 @@
-# KeyboardVR v3.2
+# KeyboardVR v3.3
 
 KeyboardVR is a Windows SteamVR virtual-device driver and desktop control bridge for using VR software without a physical VR headset.
 
 It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/mouse control, and supports real gamepads through SDL3 including PS5 DualSense touchpad head-look.
 
-## v3.2 highlights
+## v3.3 highlights
 
 - **GTAG WalkSim mode**: Options/Start toggles a controller-oriented locomotion mode intended for Gorilla Tag-style testing without real VR hardware.
   - left stick = walk / strafe the whole virtual rig
@@ -12,6 +12,16 @@ It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/
   - right stick Y = raise/lower the rig (standing height / crouch-style control)
   - D-pad up/down = extra vertical trim
   - hands automatically alternate through a walking swing while moving
+  - **Cross/A = directional jump**
+    - left-stick direction at takeoff determines forward/backward/side/diagonal jump direction
+    - centered stick gives a mostly vertical hop
+  - **L3 held = sprint**
+    - increases ground speed
+    - increases jump horizontal impulse and slightly increases jump height
+  - **Circle/B = manual tag lunge**
+    - selected hand thrusts forward and returns
+    - if HEAD is selected, it defaults to the right hand
+    - this is pose-based and does not auto-detect opponents
   - physical stick axes are not also forwarded as VR thumbstick locomotion in WalkSim, avoiding accidental double movement
 - **SnapTo mode**: Create/Back toggles absolute hand positioning.
   - each stick maps directly to a hand position around the HMD instead of accumulating movement over time
@@ -44,7 +54,7 @@ It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/
 
 ## Install the prebuilt Windows release
 
-1. Extract `KeyboardVR-v3.2-Windows-x64.zip`.
+1. Extract `KeyboardVR-v3.3-Windows-x64.zip`.
 2. Fully close SteamVR.
 3. Double-click `Install Driver.bat`.
 4. Run `KeyboardVR.exe`.

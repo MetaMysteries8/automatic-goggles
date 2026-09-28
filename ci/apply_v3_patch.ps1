@@ -119,6 +119,8 @@ Replace-Required @'
     bool prevBack = false;
     bool prevStart = false;
     bool prevWest = false;
+    bool prevSouth = false;
+    bool prevEast = false;
     bool snapBaseValid = false;
     bool walkBaseValid = false;
     LocalOffset snapLeftBase{};
@@ -126,6 +128,13 @@ Replace-Required @'
     LocalOffset walkLeftBase{};
     LocalOffset walkRightBase{};
     float walkPhase = 0.0f;
+    bool walkAirborne = false;
+    float walkGroundY = 0.0f;
+    float jumpVerticalVelocity = 0.0f;
+    float jumpForwardVelocity = 0.0f;
+    float jumpRightVelocity = 0.0f;
+    float tagLungeTimer = 0.0f;
+    bool tagLungeLeft = false;
 
     void CaptureSnapBase(const keyboardvr::SharedState& s) {
         snapLeftBase = ToHeadLocal(s.hmd, s.left);
@@ -138,6 +147,12 @@ Replace-Required @'
         walkRightBase = ToHeadLocal(s.hmd, s.right);
         walkBaseValid = true;
         walkPhase = 0.0f;
+        walkGroundY = s.hmd.y;
+        walkAirborne = false;
+        jumpVerticalVelocity = 0.0f;
+        jumpForwardVelocity = 0.0f;
+        jumpRightVelocity = 0.0f;
+        tagLungeTimer = 0.0f;
     }
 
     void SetMode(GamepadPoseMode mode, keyboardvr::SharedState& s) {
@@ -183,6 +198,9 @@ $updateReplacement = @'
         const bool start = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START);
         const bool west = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_WEST);
         const bool north = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_NORTH);
+        const bool south = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_SOUTH);
+        const bool east = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_EAST);
+        const bool sprinting = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
 
         // Create/Back toggles absolute SnapTo hand positioning.
         if (back && !prevBack) {
@@ -314,35 +332,116 @@ $updateReplacement = @'
         }
         else {
             // GTAG WalkSim:
-            // LS = body walk/strafe, RS X = turn, RS Y = body height.
-            // The bridge carries the tracked rig and creates alternating
-            // arm swings so you don't have to manually "walk" both hands.
+            // LS = move/strafe, L3 = sprint, Cross/A = directional jump,
+            // RS X = turn, RS Y = standing/crouch height, Circle/B = tag lunge.
             if (!walkBaseValid) CaptureWalkBase(s);
 
-            const float moveScale = s.moveSpeed * 1.55f * dt;
+            const float sprintMultiplier = sprinting ? 2.10f : 1.0f;
+            const float moveScale = s.moveSpeed * 1.55f * sprintMultiplier * dt;
             const float verticalScale = s.moveSpeed * 0.70f * dt;
+
+            // Directional jump impulse comes from the left stick at takeoff.
+            // Forward/back/diagonal jumps therefore fall out naturally from
+            // the same stick you are already using to run.
+            if (south && !prevSouth && !walkAirborne) {
+                walkGroundY = s.hmd.y;
+                walkAirborne = true;
+                jumpVerticalVelocity = sprinting ? 3.85f : 3.45f;
+                const float jumpHorizontal = sprinting ? 3.10f : 2.25f;
+                jumpForwardVelocity = -ly * jumpHorizontal;
+                jumpRightVelocity = lx * jumpHorizontal;
+            }
+
+            // Manual tag lunge. Use selected hand; HEAD defaults to right hand.
+            if (east && !prevEast) {
+                tagLungeLeft = s.activeTarget == keyboardvr::ActiveTarget::Left;
+                tagLungeTimer = 0.24f;
+            }
+
+            prevSouth = south;
+            prevEast = east;
+
+            // Ground movement remains available in air, but reduced slightly.
+            const float airControl = walkAirborne ? 0.42f : 1.0f;
             MoveWholeRig(
                 s,
-                -ly * moveScale,
-                lx * moveScale,
-                -ry * verticalScale + dpadVertical * verticalScale
+                -ly * moveScale * airControl,
+                lx * moveScale * airControl,
+                0.0f
             );
+
+            // Right stick / D-pad adjust standing height only while grounded.
+            if (!walkAirborne) {
+                const float manualY =
+                    -ry * verticalScale + dpadVertical * verticalScale;
+                if (manualY != 0.0f) {
+                    MoveWholeRig(s, 0.0f, 0.0f, manualY);
+                    walkGroundY = s.hmd.y;
+                }
+            }
+
+            // Simple deterministic jump arc at the tracking-rig layer.
+            if (walkAirborne) {
+                constexpr float kGravity = 9.81f;
+                constexpr float kAirDrag = 2.35f;
+
+                MoveWholeRig(
+                    s,
+                    jumpForwardVelocity * dt,
+                    jumpRightVelocity * dt,
+                    jumpVerticalVelocity * dt
+                );
+
+                jumpVerticalVelocity -= kGravity * dt;
+                const float drag = std::max(0.0f, 1.0f - kAirDrag * dt);
+                jumpForwardVelocity *= drag;
+                jumpRightVelocity *= drag;
+
+                if (jumpVerticalVelocity <= 0.0f && s.hmd.y <= walkGroundY) {
+                    const float correction = walkGroundY - s.hmd.y;
+                    MoveWholeRig(s, 0.0f, 0.0f, correction);
+                    walkAirborne = false;
+                    jumpVerticalVelocity = 0.0f;
+                    jumpForwardVelocity = 0.0f;
+                    jumpRightVelocity = 0.0f;
+                }
+            }
 
             const float turnStep = DegToRad(s.rotationSpeed * 1.20f * rx * dt);
             s.hmd.yaw = keyboardvr::WrapAngle(s.hmd.yaw - turnStep);
 
             const float walkMagnitude = std::clamp(std::sqrt(lx * lx + ly * ly), 0.0f, 1.0f);
-            walkPhase += dt * (4.5f + 4.0f * walkMagnitude);
+            const float gaitSpeed = sprinting ? 1.55f : 1.0f;
+            walkPhase += dt * (4.5f + 4.0f * walkMagnitude) * gaitSpeed;
             const float wave = std::sin(walkPhase);
-            const float swing = wave * 0.20f * walkMagnitude;
+            const float swingScale = sprinting ? 0.28f : 0.20f;
+            const float swing = wave * swingScale * walkMagnitude;
             const float leftLift = std::max(0.0f, wave) * 0.065f * walkMagnitude;
             const float rightLift = std::max(0.0f, -wave) * 0.065f * walkMagnitude;
 
-            SetHandFromHeadLocal(s.left, s.hmd, walkLeftBase, swing, 0.0f, leftLift);
-            SetHandFromHeadLocal(s.right, s.hmd, walkRightBase, -swing, 0.0f, rightLift);
+            constexpr float kTagLungeDuration = 0.24f;
+            float tagLeftForward = 0.0f;
+            float tagRightForward = 0.0f;
+            if (tagLungeTimer > 0.0f) {
+                const float progress =
+                    1.0f - std::clamp(tagLungeTimer / kTagLungeDuration, 0.0f, 1.0f);
+                const float reach = std::sin(progress * kPi) * 0.55f;
+                if (tagLungeLeft) tagLeftForward = reach;
+                else tagRightForward = reach;
+                tagLungeTimer = std::max(0.0f, tagLungeTimer - dt);
+            }
 
-            // Don't also send locomotion sticks into the VR title while
-            // WalkSim is consuming them, which avoids accidental double movement.
+            SetHandFromHeadLocal(
+                s.left, s.hmd, walkLeftBase,
+                swing + tagLeftForward, 0.0f, leftLift
+            );
+            SetHandFromHeadLocal(
+                s.right, s.hmd, walkRightBase,
+                -swing + tagRightForward, 0.0f, rightLift
+            );
+
+            // WalkSim consumes the locomotion controls so the VR title does
+            // not simultaneously apply thumbstick locomotion.
             s.leftInput.joyX = 0.0f;
             s.leftInput.joyY = 0.0f;
             s.rightInput.joyX = 0.0f;
@@ -371,14 +470,17 @@ $updateReplacement = @'
             s.rightInput.grip = 1.0f;
             s.rightInput.buttons |= keyboardvr::Button_Grip;
         }
-        if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK)) {
+        if (g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim &&
+            SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK)) {
             s.leftInput.buttons |= keyboardvr::Button_Joystick;
         }
         if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK)) {
             s.rightInput.buttons |= keyboardvr::Button_Joystick;
         }
 
-        MergeSelectedFaceButtons(pad, s);
+        if (g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim) {
+            MergeSelectedFaceButtons(pad, s);
+        }
 
         // DualSense/DualShock touchpad (and any SDL gamepad touchpad) = head look.
         if (SDL_GetNumGamepadTouchpads(pad) > 0 && SDL_GetNumGamepadTouchpadFingers(pad, 0) > 0) {
@@ -425,7 +527,8 @@ Replace-Required @'
     std::printf("Normal: LS/RS hands X/Z | hold Triangle for analog X/Y + up/down         \n");
     std::printf("SnapTo: sticks=absolute X/Z | L2/R2=analog hand height (squeeze=lower)  \n");
     std::printf("         hold Triangle for absolute X/Y positioning too                  \n");
-    std::printf("WalkSim: LS walk/strafe | RS X turn | RS Y height | auto arm swing       \n");
+    std::printf("WalkSim: LS move | L3 sprint | Cross jump | Circle tag lunge              \n");
+    std::printf("         jump direction follows LS | RS X turn | RS Y body height         \n");
 '@ "console gamepad movement help"
 
 Replace-Required @'
@@ -445,4 +548,4 @@ Replace-Required @'
 '@ "visualizer mode status"
 
 [IO.File]::WriteAllText($controller, $text)
-Write-Host "Applied KeyboardVR v3.2 GTAG WalkSim + SnapTo + trigger-height + head-aligned controllers patch."
+Write-Host "Applied KeyboardVR v3.3 WalkSim jumping + sprint + tag-lunge patch."
