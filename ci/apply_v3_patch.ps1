@@ -47,7 +47,8 @@ bool g_mouseLookActive = false;
 enum class GamepadPoseMode {
     Velocity,
     SnapTo,
-    GtagWalkSim
+    GtagWalkSim,
+    LegacyWalkSim
 };
 
 GamepadPoseMode g_gamepadPoseMode = GamepadPoseMode::Velocity;
@@ -143,6 +144,7 @@ Replace-Required @'
     bool prevWest = false;
     bool prevSouth = false;
     bool prevEast = false;
+    bool prevR3 = false;
     bool snapBaseValid = false;
     bool walkBaseValid = false;
     LocalOffset snapLeftBase{};
@@ -205,6 +207,14 @@ Replace-Required @'
                 AlignControllersToHead(s);
                 CaptureWalkBase(s);
                 break;
+            case GamepadPoseMode::LegacyWalkSim:
+                g_gamepadModeName = "LEGACY WALK";
+                s.leftInput = {};
+                s.rightInput = {};
+                RecenterHandsAroundCurrentHead(s);
+                AlignControllersToHead(s);
+                CaptureWalkBase(s);
+                break;
         }
     }
 '@ "GamepadBridge mode fields"
@@ -234,6 +244,7 @@ $updateReplacement = @'
         const bool north = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_NORTH);
         const bool south = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_SOUTH);
         const bool east = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_EAST);
+        const bool r3 = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
         const bool sprinting = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
 
         // Create/Back toggles absolute SnapTo hand positioning.
@@ -246,14 +257,25 @@ $updateReplacement = @'
             );
         }
 
-        // Options/Start toggles the dedicated Gorilla Tag-style walk simulator.
+        // Options/Start enters/exits the WalkSim family.
         if (start && !prevStart) {
+            const bool inWalkSim =
+                g_gamepadPoseMode == GamepadPoseMode::GtagWalkSim ||
+                g_gamepadPoseMode == GamepadPoseMode::LegacyWalkSim;
             SetMode(
-                g_gamepadPoseMode == GamepadPoseMode::GtagWalkSim
-                    ? GamepadPoseMode::Velocity
-                    : GamepadPoseMode::GtagWalkSim,
+                inWalkSim ? GamepadPoseMode::Velocity : GamepadPoseMode::GtagWalkSim,
                 s
             );
+        }
+
+        // While in either WalkSim, R3 swaps proper arm-driven locomotion with
+        // the deliberately cursed legacy direct-body mode.
+        if (r3 && !prevR3) {
+            if (g_gamepadPoseMode == GamepadPoseMode::GtagWalkSim) {
+                SetMode(GamepadPoseMode::LegacyWalkSim, s);
+            } else if (g_gamepadPoseMode == GamepadPoseMode::LegacyWalkSim) {
+                SetMode(GamepadPoseMode::GtagWalkSim, s);
+            }
         }
 
         g_verticalStickMode = north;
@@ -263,7 +285,12 @@ $updateReplacement = @'
         if (west && !prevWest) {
             if (g_gamepadPoseMode == GamepadPoseMode::SnapTo) {
                 CaptureSnapBase(s);
-            } else if (g_gamepadPoseMode == GamepadPoseMode::GtagWalkSim) {
+            } else if (
+                g_gamepadPoseMode == GamepadPoseMode::GtagWalkSim ||
+                g_gamepadPoseMode == GamepadPoseMode::LegacyWalkSim
+            ) {
+                RecenterHandsAroundCurrentHead(s);
+                AlignControllersToHead(s);
                 CaptureWalkBase(s);
             } else {
                 RecenterHandsAroundCurrentHead(s);
@@ -273,6 +300,7 @@ $updateReplacement = @'
         prevBack = back;
         prevStart = start;
         prevWest = west;
+        prevR3 = r3;
 
         const float dpadVertical =
             (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_UP) ? 1.0f : 0.0f)
@@ -364,7 +392,7 @@ $updateReplacement = @'
             s.rightInput.joyX = rx;
             s.rightInput.joyY = -ry;
         }
-        else {
+        else if (g_gamepadPoseMode == GamepadPoseMode::GtagWalkSim) {
             // GTAG WalkSim is intentionally ARM-DRIVEN ONLY.
             //
             // We never translate or rotate the HMD here. Gorilla-style movement
@@ -489,6 +517,118 @@ $updateReplacement = @'
             s.rightInput.joyY = 0.0f;
         }
 
+        else {
+            // LEGACY WALKSim — intentionally ridiculous.
+            // This is the old joystick-locomotion version kept as a joke mode:
+            // it directly translates the virtual HMD/body, runs a fake jump arc,
+            // and still lets Circle/B throw a giant tag-punch reach.
+            if (!walkBaseValid) CaptureWalkBase(s);
+
+            const float sprintMultiplier = sprinting ? 2.10f : 1.0f;
+            const float moveScale = s.moveSpeed * 1.55f * sprintMultiplier * dt;
+            const float verticalScale = s.moveSpeed * 0.70f * dt;
+
+            if (south && !prevSouth && !walkAirborne) {
+                walkGroundY = s.hmd.y;
+                walkAirborne = true;
+                jumpVerticalVelocity = sprinting ? 3.85f : 3.45f;
+                const float jumpHorizontal = sprinting ? 3.10f : 2.25f;
+                jumpForwardVelocity = -ly * jumpHorizontal;
+                jumpRightVelocity = lx * jumpHorizontal;
+            }
+
+            if (east && !prevEast) {
+                tagLungeLeft = s.activeTarget == keyboardvr::ActiveTarget::Left;
+                tagLungeTimer = 0.24f;
+            }
+
+            prevSouth = south;
+            prevEast = east;
+
+            const float airControl = walkAirborne ? 0.42f : 1.0f;
+            MoveWholeRig(
+                s,
+                -ly * moveScale * airControl,
+                lx * moveScale * airControl,
+                0.0f
+            );
+
+            if (!walkAirborne) {
+                const float manualY =
+                    -ry * verticalScale + dpadVertical * verticalScale;
+                if (manualY != 0.0f) {
+                    MoveWholeRig(s, 0.0f, 0.0f, manualY);
+                    walkGroundY = s.hmd.y;
+                }
+            }
+
+            if (walkAirborne) {
+                constexpr float kGravity = 9.81f;
+                constexpr float kAirDrag = 2.35f;
+
+                MoveWholeRig(
+                    s,
+                    jumpForwardVelocity * dt,
+                    jumpRightVelocity * dt,
+                    jumpVerticalVelocity * dt
+                );
+
+                jumpVerticalVelocity -= kGravity * dt;
+                const float drag = std::max(0.0f, 1.0f - kAirDrag * dt);
+                jumpForwardVelocity *= drag;
+                jumpRightVelocity *= drag;
+
+                if (jumpVerticalVelocity <= 0.0f && s.hmd.y <= walkGroundY) {
+                    const float correction = walkGroundY - s.hmd.y;
+                    MoveWholeRig(s, 0.0f, 0.0f, correction);
+                    walkAirborne = false;
+                    jumpVerticalVelocity = 0.0f;
+                    jumpForwardVelocity = 0.0f;
+                    jumpRightVelocity = 0.0f;
+                }
+            }
+
+            const float turnStep = DegToRad(s.rotationSpeed * 1.20f * rx * dt);
+            s.hmd.yaw = keyboardvr::WrapAngle(s.hmd.yaw - turnStep);
+
+            const float walkMagnitude =
+                std::clamp(std::sqrt(lx * lx + ly * ly), 0.0f, 1.0f);
+            const float gaitSpeed = sprinting ? 1.55f : 1.0f;
+            walkPhase += dt * (4.5f + 4.0f * walkMagnitude) * gaitSpeed;
+            const float wave = std::sin(walkPhase);
+            const float swingScale = sprinting ? 0.28f : 0.20f;
+            const float swing = wave * swingScale * walkMagnitude;
+            const float leftLift = std::max(0.0f, wave) * 0.065f * walkMagnitude;
+            const float rightLift = std::max(0.0f, -wave) * 0.065f * walkMagnitude;
+
+            constexpr float kTagLungeDuration = 0.24f;
+            float tagLeftForward = 0.0f;
+            float tagRightForward = 0.0f;
+            if (tagLungeTimer > 0.0f) {
+                const float progress =
+                    1.0f - std::clamp(tagLungeTimer / kTagLungeDuration, 0.0f, 1.0f);
+                // Slightly more ridiculous than modern mode on purpose.
+                const float reach = std::sin(progress * kPi) * 0.72f;
+                if (tagLungeLeft) tagLeftForward = reach;
+                else tagRightForward = reach;
+                tagLungeTimer = std::max(0.0f, tagLungeTimer - dt);
+            }
+
+            SetHandFromHeadLocal(
+                s.left, s.hmd, walkLeftBase,
+                swing + tagLeftForward, 0.0f, leftLift
+            );
+            SetHandFromHeadLocal(
+                s.right, s.hmd, walkRightBase,
+                -swing + tagRightForward, 0.0f, rightLift
+            );
+
+            s.leftInput.joyX = 0.0f;
+            s.leftInput.joyY = 0.0f;
+            s.rightInput.joyX = 0.0f;
+            s.rightInput.joyY = 0.0f;
+        }
+
         // Keep controller direction synchronized with head direction in every
         // physical-gamepad pose mode. This prevents hands from being in the
         // correct place while still pointing along an old world-space rotation.
@@ -511,15 +651,25 @@ $updateReplacement = @'
             s.rightInput.grip = 1.0f;
             s.rightInput.buttons |= keyboardvr::Button_Grip;
         }
-        if (g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim &&
-            SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK)) {
+        if (
+            g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim &&
+            g_gamepadPoseMode != GamepadPoseMode::LegacyWalkSim &&
+            SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK)
+        ) {
             s.leftInput.buttons |= keyboardvr::Button_Joystick;
         }
-        if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK)) {
+        if (
+            g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim &&
+            g_gamepadPoseMode != GamepadPoseMode::LegacyWalkSim &&
+            SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK)
+        ) {
             s.rightInput.buttons |= keyboardvr::Button_Joystick;
         }
 
-        if (g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim) {
+        if (
+            g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim &&
+            g_gamepadPoseMode != GamepadPoseMode::LegacyWalkSim
+        ) {
             MergeSelectedFaceButtons(pad, s);
         }
 
@@ -568,8 +718,9 @@ Replace-Required @'
     std::printf("Normal: LS/RS hands X/Z | hold Triangle for analog X/Y + up/down         \n");
     std::printf("SnapTo: sticks=absolute X/Z | L2/R2=analog hand height (squeeze=lower)  \n");
     std::printf("         hold Triangle for absolute X/Y positioning too                  \n");
-    std::printf("WalkSim: ARM-ONLY | LS=stroke direction | L3=stronger/faster strokes      \n");
-    std::printf("         Cross=2-arm jump push | Circle=tag lunge | RS Y=hand height trim \n");
+    std::printf("WalkSim: ARM-ONLY | R3 toggles cursed LEGACY WALK mode                    \n");
+    std::printf("Modern: LS strokes | L3 sprint-strokes | Cross push-jump | Circle tag     \n");
+    std::printf("Legacy: LS body move | RS turn/height | L3 sprint | Cross jump | tag punch\n");
 '@ "console gamepad movement help"
 
 Replace-Required @'
@@ -589,4 +740,4 @@ Replace-Required @'
 '@ "visualizer mode status"
 
 [IO.File]::WriteAllText($controller, $text)
-Write-Host "Applied KeyboardVR v3.5 arm-driven Gorilla locomotion patch."
+Write-Host "Applied KeyboardVR v3.6 modern + legacy WalkSim patch."
