@@ -39,6 +39,12 @@ jobs:
             throw "KeyboardVR v2 source reconstruction failed."
           }
 
+      - name: Dump controller source for walksim development
+        shell: pwsh
+        run: |
+          Get-Content "$PWD\v2src\KeyboardVR\src\controller\main.cpp"
+
+
       - name: Apply MSVC compatibility fixes
         shell: pwsh
         run: |
