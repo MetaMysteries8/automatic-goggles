@@ -389,10 +389,8 @@ $text = $regex.Replace($text, $updateReplacement, 1)
 
 # Console status + help.
 Replace-Required @'
-    std::printf("Move speed: %.2f m/s   Rotation: %.1f deg/s   Mouse-look: %-3s          \n",
                 s.moveSpeed, s.rotationSpeed, g_mouseLookActive ? "ON" : "off");
 '@ @'
-    std::printf("Move speed: %.2f m/s   Rotation: %.1f deg/s   Mouse-look: %-3s          \n",
                 s.moveSpeed, s.rotationSpeed, g_mouseLookActive ? "ON" : "off");
     std::printf("Gamepad mode: %-12.12s   Vertical-stick modifier: %-3s                 \n",
                 g_gamepadModeName.c_str(), g_verticalStickMode ? "ON" : "off");
@@ -400,14 +398,18 @@ Replace-Required @'
 
 Replace-Required @'
     std::printf("Gamepad: LS=left hand X/Z | RS=right hand X/Z | D-pad up/down=selected Y\n");
-    std::printf("L2/R2 triggers | L1/R1 grips | stick clicks | face buttons=selected hand\n");
 '@ @'
     std::printf("Gamepad: Create=SnapTo | Options=GTAG WalkSim | Square=recenter/anchor    \n");
     std::printf("Normal: LS/RS hands X/Z | hold Triangle for analog X/Y + up/down         \n");
     std::printf("SnapTo: sticks=absolute hand position | Triangle=absolute vertical plane \n");
     std::printf("WalkSim: LS walk/strafe | RS X turn | RS Y height | auto arm swing       \n");
+'@ "console gamepad movement help"
+
+Replace-Required @'
+    std::printf("L2/R2 triggers | L1/R1 grips | stick clicks | face buttons=selected hand\n");
+'@ @'
     std::printf("L2/R2 triggers | L1/R1 grips | stick clicks | D-pad Y trim/select        \n");
-'@ "console gamepad help"
+'@ "console gamepad button help"
 
 # Visualizer status includes the active gamepad control mode.
 Replace-Required @'
