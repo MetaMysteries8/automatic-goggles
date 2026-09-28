@@ -164,6 +164,8 @@ $updateReplacement = @'
         const float rx = NormalizeAxis(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX));
         const float ry = NormalizeAxis(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY));
         const float poseSpeed = s.moveSpeed * dt;
+        const float lt = NormalizeTrigger(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
+        const float rt = NormalizeTrigger(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
 
         const bool back = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK);
         const bool start = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START);
@@ -248,6 +250,7 @@ $updateReplacement = @'
             constexpr float kSnapHorizontalReach = 0.65f;
             constexpr float kSnapDepthReach = 0.70f;
             constexpr float kSnapVerticalReach = 0.75f;
+            constexpr float kSnapTriggerDrop = 0.85f;
 
             // Absolute stick -> hand position. Letting go of a stick returns
             // the hand to its captured neutral anchor instead of drifting.
@@ -256,26 +259,26 @@ $updateReplacement = @'
                     s.left, s.hmd, snapLeftBase,
                     0.0f,
                     lx * kSnapHorizontalReach,
-                    -ly * kSnapVerticalReach
+                    -ly * kSnapVerticalReach - lt * kSnapTriggerDrop
                 );
                 SetHandFromHeadLocal(
                     s.right, s.hmd, snapRightBase,
                     0.0f,
                     rx * kSnapHorizontalReach,
-                    -ry * kSnapVerticalReach
+                    -ry * kSnapVerticalReach - rt * kSnapTriggerDrop
                 );
             } else {
                 SetHandFromHeadLocal(
                     s.left, s.hmd, snapLeftBase,
                     -ly * kSnapDepthReach,
                     lx * kSnapHorizontalReach,
-                    0.0f
+                    -lt * kSnapTriggerDrop
                 );
                 SetHandFromHeadLocal(
                     s.right, s.hmd, snapRightBase,
                     -ry * kSnapDepthReach,
                     rx * kSnapHorizontalReach,
-                    0.0f
+                    -rt * kSnapTriggerDrop
                 );
             }
 
@@ -334,12 +337,14 @@ $updateReplacement = @'
             s.rightInput.joyY = 0.0f;
         }
 
-        const float lt = NormalizeTrigger(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
-        const float rt = NormalizeTrigger(SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
-        s.leftInput.trigger = std::max(s.leftInput.trigger, lt);
-        s.rightInput.trigger = std::max(s.rightInput.trigger, rt);
-        if (lt > 0.80f) s.leftInput.buttons |= keyboardvr::Button_Trigger;
-        if (rt > 0.80f) s.rightInput.buttons |= keyboardvr::Button_Trigger;
+        // In SnapTo, analog triggers are dedicated hand-height controls.
+        // In the other modes they remain normal VR trigger inputs.
+        if (g_gamepadPoseMode != GamepadPoseMode::SnapTo) {
+            s.leftInput.trigger = std::max(s.leftInput.trigger, lt);
+            s.rightInput.trigger = std::max(s.rightInput.trigger, rt);
+            if (lt > 0.80f) s.leftInput.buttons |= keyboardvr::Button_Trigger;
+            if (rt > 0.80f) s.rightInput.buttons |= keyboardvr::Button_Trigger;
+        }
 
         if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
             s.leftInput.grip = 1.0f;
@@ -401,7 +406,8 @@ Replace-Required @'
 '@ @'
     std::printf("Gamepad: Create=SnapTo | Options=GTAG WalkSim | Square=recenter/anchor    \n");
     std::printf("Normal: LS/RS hands X/Z | hold Triangle for analog X/Y + up/down         \n");
-    std::printf("SnapTo: sticks=absolute hand position | Triangle=absolute vertical plane \n");
+    std::printf("SnapTo: sticks=absolute X/Z | L2/R2=analog hand height (squeeze=lower)  \n");
+    std::printf("         hold Triangle for absolute X/Y positioning too                  \n");
     std::printf("WalkSim: LS walk/strafe | RS X turn | RS Y height | auto arm swing       \n");
 '@ "console gamepad movement help"
 
@@ -421,4 +427,4 @@ Replace-Required @'
 '@ "visualizer mode status"
 
 [IO.File]::WriteAllText($controller, $text)
-Write-Host "Applied KeyboardVR v3 GTAG WalkSim + SnapTo + vertical-control patch."
+Write-Host "Applied KeyboardVR v3.1 GTAG WalkSim + SnapTo + analog trigger-height patch."

@@ -1,10 +1,10 @@
-# KeyboardVR v3
+# KeyboardVR v3.1
 
 KeyboardVR is a Windows SteamVR virtual-device driver and desktop control bridge for using VR software without a physical VR headset.
 
 It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/mouse control, and supports real gamepads through SDL3 including PS5 DualSense touchpad head-look.
 
-## v3 highlights
+## v3.1 highlights
 
 - **GTAG WalkSim mode**: Options/Start toggles a controller-oriented locomotion mode intended for Gorilla Tag-style testing without real VR hardware.
   - left stick = walk / strafe the whole virtual rig
@@ -17,6 +17,9 @@ It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/
   - each stick maps directly to a hand position around the HMD instead of accumulating movement over time
   - letting go of the stick returns that hand to its captured neutral anchor
   - hold Triangle/Y to switch both sticks to an X/Y plane for direct analog up/down placement
+  - **L2 controls left-hand height and R2 controls right-hand height**
+  - trigger travel is analog: a light squeeze lowers the matching hand a little; a full squeeze lowers it by about 0.85 m
+  - in SnapTo, L2/R2 are consumed for height control so they do not accidentally fire VR trigger actions
   - Square/X recaptures the current neutral anchors
 - **Improved normal gamepad mode**
   - left stick moves left hand, right stick moves right hand
@@ -37,7 +40,7 @@ It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/
 
 ## Install the prebuilt Windows release
 
-1. Extract `KeyboardVR-v3-Windows-x64.zip`.
+1. Extract `KeyboardVR-v3.1-Windows-x64.zip`.
 2. Fully close SteamVR.
 3. Double-click `Install Driver.bat`.
 4. Run `KeyboardVR.exe`.
