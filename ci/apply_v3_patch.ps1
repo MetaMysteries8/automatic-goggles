@@ -7,6 +7,7 @@ $controller = [IO.Path]::GetFullPath($controller)
 if (-not (Test-Path $controller)) { throw "Controller source not found: $controller" }
 
 $text = Get-Content $controller -Raw
+$text = $text -replace "`r`n", "`n"
 
 function Replace-Required([string]$old, [string]$new, [string]$label) {
     if (-not $script:text.Contains($old)) {
