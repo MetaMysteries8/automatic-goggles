@@ -16,6 +16,54 @@ function Replace-Required([string]$old, [string]$new, [string]$label) {
     $script:text = $script:text.Replace($old, $new)
 }
 
+
+# OpenVR is +Y up, +X right, -Z forward. Positive yaw around +Y rotates
+# the forward vector (-Z) toward -X. Keep all pose-relative movement and
+# hand-orbit math in that same convention.
+Replace-Required @'
+void MoveLocal(keyboardvr::PoseState& p, float forward, float right, float up) {
+    const float sy = std::sin(p.yaw);
+    const float cy = std::cos(p.yaw);
+
+    p.x += sy * forward + cy * right;
+    p.z += -cy * forward + sy * right;
+    p.y += up;
+}
+
+void MoveRelativeToYaw(keyboardvr::PoseState& p, float yaw, float forward, float right, float up) {
+    const float sy = std::sin(yaw);
+    const float cy = std::cos(yaw);
+    p.x += sy * forward + cy * right;
+    p.z += -cy * forward + sy * right;
+    p.y += up;
+}
+'@ @'
+void MoveLocal(keyboardvr::PoseState& p, float forward, float right, float up) {
+    const float sy = std::sin(p.yaw);
+    const float cy = std::cos(p.yaw);
+
+    p.x += -sy * forward + cy * right;
+    p.z += -cy * forward - sy * right;
+    p.y += up;
+}
+
+void MoveRelativeToYaw(keyboardvr::PoseState& p, float yaw, float forward, float right, float up) {
+    const float sy = std::sin(yaw);
+    const float cy = std::cos(yaw);
+    p.x += -sy * forward + cy * right;
+    p.z += -cy * forward - sy * right;
+    p.y += up;
+}
+'@ "OpenVR yaw-relative movement convention"
+
+Replace-Required @'
+    hand.x = head.x + rx * c - rz * s;
+    hand.z = head.z + rx * s + rz * c;
+'@ @'
+    hand.x = head.x + rx * c + rz * s;
+    hand.z = head.z - rx * s + rz * c;
+'@ "OpenVR hand orbit yaw convention"
+
 # Global UI/mode state.
 Replace-Required @'
 bool g_mouseLookActive = false;
@@ -49,8 +97,8 @@ LocalOffset ToHeadLocal(const keyboardvr::PoseState& head, const keyboardvr::Pos
     const float sy = std::sin(head.yaw);
     const float cy = std::cos(head.yaw);
     LocalOffset out{};
-    out.forward = sy * dx - cy * dz;
-    out.right = cy * dx + sy * dz;
+    out.forward = -sy * dx - cy * dz;
+    out.right = cy * dx - sy * dz;
     out.up = hand.y - head.y;
     return out;
 }
@@ -165,10 +213,18 @@ Replace-Required @'
                 break;
             case GamepadPoseMode::SnapTo:
                 g_gamepadModeName = "SNAPTO";
+                s.leftInput = {};
+                s.rightInput = {};
+                RecenterHandsAroundCurrentHead(s);
+                AlignControllersToHead(s);
                 CaptureSnapBase(s);
                 break;
             case GamepadPoseMode::GtagWalkSim:
                 g_gamepadModeName = "GTAG WALKSIM";
+                s.leftInput = {};
+                s.rightInput = {};
+                RecenterHandsAroundCurrentHead(s);
+                AlignControllersToHead(s);
                 CaptureWalkBase(s);
                 break;
         }
@@ -523,7 +579,7 @@ Replace-Required @'
 Replace-Required @'
     std::printf("Gamepad: LS=left hand X/Z | RS=right hand X/Z | D-pad up/down=selected Y\n");
 '@ @'
-    std::printf("Gamepad: Create=SnapTo | Options=GTAG WalkSim | Square=recenter/anchor    \n");
+    std::printf("Gamepad: Create=SnapTo | Options=GTAG WalkSim | modes reset hand anchors \n");
     std::printf("Normal: LS/RS hands X/Z | hold Triangle for analog X/Y + up/down         \n");
     std::printf("SnapTo: sticks=absolute X/Z | L2/R2=analog hand height (squeeze=lower)  \n");
     std::printf("         hold Triangle for absolute X/Y positioning too                  \n");
@@ -548,4 +604,4 @@ Replace-Required @'
 '@ "visualizer mode status"
 
 [IO.File]::WriteAllText($controller, $text)
-Write-Host "Applied KeyboardVR v3.3 WalkSim jumping + sprint + tag-lunge patch."
+Write-Host "Applied KeyboardVR v3.4 yaw-sign + deterministic mode-reset patch."
