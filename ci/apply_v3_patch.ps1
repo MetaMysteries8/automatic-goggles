@@ -20,49 +20,32 @@ function Replace-Required([string]$old, [string]$new, [string]$label) {
 # OpenVR is +Y up, +X right, -Z forward. Positive yaw around +Y rotates
 # the forward vector (-Z) toward -X. Keep all pose-relative movement and
 # hand-orbit math in that same convention.
-Replace-Required @'
-void MoveLocal(keyboardvr::PoseState& p, float forward, float right, float up) {
-    const float sy = std::sin(p.yaw);
-    const float cy = std::cos(p.yaw);
-
+$oldMove = @'
     p.x += sy * forward + cy * right;
     p.z += -cy * forward + sy * right;
-    p.y += up;
-}
-
-void MoveRelativeToYaw(keyboardvr::PoseState& p, float yaw, float forward, float right, float up) {
-    const float sy = std::sin(yaw);
-    const float cy = std::cos(yaw);
-    p.x += sy * forward + cy * right;
-    p.z += -cy * forward + sy * right;
-    p.y += up;
-}
-'@ @'
-void MoveLocal(keyboardvr::PoseState& p, float forward, float right, float up) {
-    const float sy = std::sin(p.yaw);
-    const float cy = std::cos(p.yaw);
-
+'@
+$newMove = @'
     p.x += -sy * forward + cy * right;
     p.z += -cy * forward - sy * right;
-    p.y += up;
+'@
+$moveMatches = ([regex]::Matches($text, [regex]::Escape($oldMove))).Count
+if ($moveMatches -lt 2) {
+    throw "KeyboardVR v3 patch failed: expected two yaw-relative movement blocks, found $moveMatches"
 }
+$text = $text.Replace($oldMove, $newMove)
 
-void MoveRelativeToYaw(keyboardvr::PoseState& p, float yaw, float forward, float right, float up) {
-    const float sy = std::sin(yaw);
-    const float cy = std::cos(yaw);
-    p.x += -sy * forward + cy * right;
-    p.z += -cy * forward - sy * right;
-    p.y += up;
-}
-'@ "OpenVR yaw-relative movement convention"
-
-Replace-Required @'
+$oldOrbit = @'
     hand.x = head.x + rx * c - rz * s;
     hand.z = head.z + rx * s + rz * c;
-'@ @'
+'@
+$newOrbit = @'
     hand.x = head.x + rx * c + rz * s;
     hand.z = head.z - rx * s + rz * c;
-'@ "OpenVR hand orbit yaw convention"
+'@
+if (-not $text.Contains($oldOrbit)) {
+    throw "KeyboardVR v3 patch failed: OpenVR hand orbit yaw block not found"
+}
+$text = $text.Replace($oldOrbit, $newOrbit)
 
 # Global UI/mode state.
 Replace-Required @'
