@@ -20,32 +20,23 @@ function Replace-Required([string]$old, [string]$new, [string]$label) {
 # OpenVR is +Y up, +X right, -Z forward. Positive yaw around +Y rotates
 # the forward vector (-Z) toward -X. Keep all pose-relative movement and
 # hand-orbit math in that same convention.
-$oldMove = @'
-    p.x += sy * forward + cy * right;
-    p.z += -cy * forward + sy * right;
-'@
-$newMove = @'
-    p.x += -sy * forward + cy * right;
-    p.z += -cy * forward - sy * right;
-'@
-$moveMatches = ([regex]::Matches($text, [regex]::Escape($oldMove))).Count
-if ($moveMatches -lt 2) {
-    throw "KeyboardVR v3 patch failed: expected two yaw-relative movement blocks, found $moveMatches"
+$moveX = "p.x += sy * forward + cy * right;"
+$moveZ = "p.z += -cy * forward + sy * right;"
+$moveXCount = ([regex]::Matches($text, [regex]::Escape($moveX))).Count
+$moveZCount = ([regex]::Matches($text, [regex]::Escape($moveZ))).Count
+if ($moveXCount -lt 2 -or $moveZCount -lt 2) {
+    throw "KeyboardVR v3 patch failed: yaw movement lines missing (x=$moveXCount z=$moveZCount)"
 }
-$text = $text.Replace($oldMove, $newMove)
+$text = $text.Replace($moveX, "p.x += -sy * forward + cy * right;")
+$text = $text.Replace($moveZ, "p.z += -cy * forward - sy * right;")
 
-$oldOrbit = @'
-    hand.x = head.x + rx * c - rz * s;
-    hand.z = head.z + rx * s + rz * c;
-'@
-$newOrbit = @'
-    hand.x = head.x + rx * c + rz * s;
-    hand.z = head.z - rx * s + rz * c;
-'@
-if (-not $text.Contains($oldOrbit)) {
-    throw "KeyboardVR v3 patch failed: OpenVR hand orbit yaw block not found"
+$orbitX = "hand.x = head.x + rx * c - rz * s;"
+$orbitZ = "hand.z = head.z + rx * s + rz * c;"
+if (-not $text.Contains($orbitX) -or -not $text.Contains($orbitZ)) {
+    throw "KeyboardVR v3 patch failed: OpenVR hand orbit yaw lines not found"
 }
-$text = $text.Replace($oldOrbit, $newOrbit)
+$text = $text.Replace($orbitX, "hand.x = head.x + rx * c + rz * s;")
+$text = $text.Replace($orbitZ, "hand.z = head.z - rx * s + rz * c;")
 
 # Global UI/mode state.
 Replace-Required @'
