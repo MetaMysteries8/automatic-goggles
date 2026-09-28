@@ -95,6 +95,18 @@ void RecenterHandsAroundCurrentHead(keyboardvr::SharedState& s) {
     SetHandFromHeadLocal(s.right, s.hmd, rightDefault);
 }
 
+void AlignControllersToHead(keyboardvr::SharedState& s) {
+    // A physical gamepad has no independent 3D orientation sensors for each hand.
+    // Keep both synthetic controllers pointing where the HMD is facing so position
+    // controls and controller direction stay in one intuitive coordinate frame.
+    s.left.yaw = s.hmd.yaw;
+    s.right.yaw = s.hmd.yaw;
+    s.left.pitch = s.hmd.pitch;
+    s.right.pitch = s.hmd.pitch;
+    s.left.roll = 0.0f;
+    s.right.roll = 0.0f;
+}
+
 void RotateHandAroundHeadYaw(
 '@ "local pose helpers"
 
@@ -337,6 +349,11 @@ $updateReplacement = @'
             s.rightInput.joyY = 0.0f;
         }
 
+        // Keep controller direction synchronized with head direction in every
+        // physical-gamepad pose mode. This prevents hands from being in the
+        // correct place while still pointing along an old world-space rotation.
+        AlignControllersToHead(s);
+
         // In SnapTo, analog triggers are dedicated hand-height controls.
         // In the other modes they remain normal VR trigger inputs.
         if (g_gamepadPoseMode != GamepadPoseMode::SnapTo) {
@@ -414,7 +431,8 @@ Replace-Required @'
 Replace-Required @'
     std::printf("L2/R2 triggers | L1/R1 grips | stick clicks | face buttons=selected hand\n");
 '@ @'
-    std::printf("L2/R2 triggers | L1/R1 grips | stick clicks | D-pad Y trim/select        \n");
+    std::printf("Hands auto-face with HMD yaw/pitch | roll neutral                        \n");
+    std::printf("L2/R2 triggers* | L1/R1 grips | stick clicks | D-pad Y trim/select       \n");
 '@ "console gamepad button help"
 
 # Visualizer status includes the active gamepad control mode.
@@ -427,4 +445,4 @@ Replace-Required @'
 '@ "visualizer mode status"
 
 [IO.File]::WriteAllText($controller, $text)
-Write-Host "Applied KeyboardVR v3.1 GTAG WalkSim + SnapTo + analog trigger-height patch."
+Write-Host "Applied KeyboardVR v3.2 GTAG WalkSim + SnapTo + trigger-height + head-aligned controllers patch."
