@@ -1,54 +1,53 @@
-# KeyboardVR v2
+# KeyboardVR v3
 
-KeyboardVR is a Windows SteamVR virtual-device driver for using VR software without a physical VR headset.
+KeyboardVR is a Windows SteamVR virtual-device driver and desktop control bridge for using VR software without a physical VR headset.
 
-## v2 adds
+It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/mouse control, and supports real gamepads through SDL3 including PS5 DualSense touchpad head-look.
 
-- virtual SteamVR HMD + left/right controllers
-- live top/front/side VR rig visualizer
-- PS5 DualSense and standard gamepad input through SDL3
-- left stick -> left hand movement
-- right stick -> right hand movement
-- DualSense touchpad drag -> head look
-- right-mouse drag -> head look
-- keyboard pose editing
-- virtual 4 m x 4 m standing/chaperone universe so SteamVR can skip the normal Room Setup flow
+## v3 highlights
+
+- **GTAG WalkSim mode**: Options/Start toggles a controller-oriented locomotion mode intended for Gorilla Tag-style testing without real VR hardware.
+  - left stick = walk / strafe the whole virtual rig
+  - right stick X = turn
+  - right stick Y = raise/lower the rig (standing height / crouch-style control)
+  - D-pad up/down = extra vertical trim
+  - hands automatically alternate through a walking swing while moving
+  - physical stick axes are not also forwarded as VR thumbstick locomotion in WalkSim, avoiding accidental double movement
+- **SnapTo mode**: Create/Back toggles absolute hand positioning.
+  - each stick maps directly to a hand position around the HMD instead of accumulating movement over time
+  - letting go of the stick returns that hand to its captured neutral anchor
+  - hold Triangle/Y to switch both sticks to an X/Y plane for direct analog up/down placement
+  - Square/X recaptures the current neutral anchors
+- **Improved normal gamepad mode**
+  - left stick moves left hand, right stick moves right hand
+  - hold Triangle/Y for analog vertical hand movement
+  - Square/X recenters the hands around the current HMD
+  - D-pad left/right selects left/right hand
+  - D-pad up/down vertically trims the selected target
+  - physical stick values are also exposed to SteamVR as real virtual-controller thumbstick axes
+- L2/R2 = left/right trigger
+- L1/R1 = left/right grip
+- L3/R3 = corresponding virtual thumbstick click
+- South/East face buttons = A/B on selected hand
+- DualSense/DualShock touchpad drag = head look
+- right mouse drag = head look
+- live top/front/side rig visualizer showing the active gamepad mode
+- virtual 4 m x 4 m standing/chaperone universe
 - Index/Knuckles-compatible controller rebinding fallback
 
-## Download the prebuilt Windows version
+## Install the prebuilt Windows release
 
-You do **not** need to compile it yourself.
-
-Open **Releases** and download:
-
-`KeyboardVR-v2-Windows-x64.zip`
-
-A fresh build is also attached to every successful **Build KeyboardVR for Windows** workflow run under the Actions tab.
-
-## Install
-
-1. Extract the Windows ZIP.
+1. Extract `KeyboardVR-v3-Windows-x64.zip`.
 2. Fully close SteamVR.
-3. Open PowerShell in the extracted folder.
-4. Run:
+3. Double-click `Install Driver.bat`.
+4. Run `KeyboardVR.exe`.
+5. Start SteamVR.
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
-.\run.ps1
-```
+No compiler or local build step is required for the release ZIP.
 
-If SteamVR still says no headset is connected, run:
+## Keyboard controls
 
-```powershell
-.\diagnose.ps1
-```
-
-## Controls
-
-Keyboard:
-
-- `1 / 2 / 3` — head / left hand / right hand
+- `1 / 2 / 3` — select head / left hand / right hand
 - `WASD` — move selected device
 - `R/F` — up/down
 - arrows — yaw/pitch
@@ -57,23 +56,20 @@ Keyboard:
 - `G` — rig-follow
 - `F1` — reset rig
 - `F2` — reset selected device
-- `F3` — show/hide visualizer
+- `F3` — show/hide rig visualizer
+- Shift — fast movement
+- Ctrl — precision movement
 
-Gamepad:
+Selected virtual-controller keyboard inputs:
 
-- left stick — left virtual hand X/Z
-- right stick — right virtual hand X/Z
-- L2/R2 — left/right trigger
-- L1/R1 — left/right grip
-- L3/R3 — corresponding virtual thumbstick click
-- DualSense touchpad drag — head yaw/pitch
+- `C` — trigger
+- `V` — grip
+- `B` — A
+- `N` — B
+- `M` — system/menu
+- `,` — thumbstick click
+- numpad `4/6/8/2` — thumbstick axes
 
-## Source and CI
+## Notes about GTAG WalkSim
 
-The v2 source archive used by CI is stored losslessly as six base64 chunks under `ci/v2.part1.b64` through `ci/v2.part6.b64`. The workflow reconstructs the ZIP and verifies this SHA-256 before it is allowed to build:
-
-`392ddafc189caf079820f7dbb18b05c5dc9ce0915d6a39a069d0a4697ed00fe8`
-
-The Windows workflow then applies the small MSVC compatibility cast required by the rig visualizer, builds the x64 EXE and SteamVR driver DLL with CMake/MSVC, verifies both binaries, packages them, uploads an Actions artifact, and publishes/updates the v0.2.0 GitHub Release.
-
-The older browseable root source is retained temporarily as the original prototype snapshot.
+WalkSim is implemented at the virtual tracking-rig layer: it moves the synthetic HMD/controllers and generates an automatic hand-swing pattern. It does not patch or modify Gorilla Tag itself. Because VR games differ in how they interpret tracked poses and locomotion, game-specific behavior can still need tuning.
