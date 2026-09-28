@@ -99,6 +99,33 @@ void SetHandFromHeadLocal(
     );
 }
 
+void SmoothLocalOffset(
+    LocalOffset& current,
+    const LocalOffset& target,
+    float dt,
+    float response
+) {
+    const float safeDt = std::clamp(dt, 0.0f, 0.05f);
+    const float alpha = 1.0f - std::exp(-response * safeDt);
+    current.forward += (target.forward - current.forward) * alpha;
+    current.right += (target.right - current.right) * alpha;
+    current.up += (target.up - current.up) * alpha;
+}
+
+void ClampLocalOffset(LocalOffset& value, float maxDistance) {
+    const float length = std::sqrt(
+        value.forward * value.forward +
+        value.right * value.right +
+        value.up * value.up
+    );
+    if (length > maxDistance && length > 0.0001f) {
+        const float scale = maxDistance / length;
+        value.forward *= scale;
+        value.right *= scale;
+        value.up *= scale;
+    }
+}
+
 void MoveWholeRig(keyboardvr::SharedState& s, float forward, float right, float up) {
     const float oldX = s.hmd.x;
     const float oldY = s.hmd.y;
@@ -164,6 +191,9 @@ Replace-Required @'
     bool tagLungeLeft = false;
     float walkJumpTimer = 0.0f;
     float walkHeightTrim = 0.0f;
+    LocalOffset walkLeftSmooth{};
+    LocalOffset walkRightSmooth{};
+    bool walkSmoothingInitialized = false;
 
     GamepadPoseMode modeBeforeComputer = GamepadPoseMode::Velocity;
     float computerCursorX = 0.0f;
@@ -197,6 +227,9 @@ Replace-Required @'
         tagLungeTimer = 0.0f;
         walkJumpTimer = 0.0f;
         walkHeightTrim = 0.0f;
+        walkLeftSmooth = {};
+        walkRightSmooth = {};
+        walkSmoothingInitialized = true;
     }
 
     void SetMode(GamepadPoseMode mode, keyboardvr::SharedState& s) {
@@ -467,37 +500,43 @@ $updateReplacement = @'
             s.rightInput.joyY = -ry;
         }
         else if (g_gamepadPoseMode == GamepadPoseMode::GtagWalkSim) {
-            // GTAG WalkSim is intentionally ARM-DRIVEN ONLY.
+            // GTAG WalkSim — arm-driven, deliberately smooth and conservative.
             //
-            // We never translate or rotate the HMD here. Gorilla-style movement
-            // should come from the VR title reacting to synthetic hand contacts.
-            // If the game moves the HMD/body as a result, the next arm pose is
-            // generated relative to that updated HMD automatically.
+            // This mirrors the useful *feel* of the classic WalkSim approach:
+            // small target poses, alternating plant/recovery phases, a curved
+            // recovery path, and smoothing toward targets rather than slamming
+            // controllers directly between large offsets.
+            //
+            // KeyboardVR still cannot raycast Gorilla Tag's Unity world from an
+            // external OpenVR driver, so the game itself remains responsible for
+            // deciding whether these synthetic hands actually make contact.
             if (!walkBaseValid) CaptureWalkBase(s);
+            if (!walkSmoothingInitialized) {
+                walkLeftSmooth = {};
+                walkRightSmooth = {};
+                walkSmoothingInitialized = true;
+            }
 
             const float intentForward = -ly;
             const float intentRight = lx;
             const float walkMagnitude =
                 std::clamp(std::sqrt(lx * lx + ly * ly), 0.0f, 1.0f);
 
-            // L3 means stronger/faster arm strokes, not direct body speed.
-            const float gaitSpeed = sprinting ? 1.75f : 1.0f;
-            const float gaitHz = (4.6f + 3.8f * walkMagnitude) * gaitSpeed;
-            walkPhase += dt * gaitHz;
+            // The original WalkSim-style motion is much calmer than our first
+            // piston gait. Keep cadence around a natural alternating step rate
+            // and only modestly increase it for sprint.
+            const float gaitRate =
+                (4.2f + 2.0f * walkMagnitude) * (sprinting ? 1.28f : 1.0f);
+            walkPhase += dt * gaitRate;
 
-            // Right-stick Y adjusts both hand anchors up/down instead of moving
-            // the head. D-pad up/down gives a coarse trim as well.
-            walkHeightTrim += (-ry * 0.55f + dpadVertical * 0.35f) * dt;
-            walkHeightTrim = std::clamp(walkHeightTrim, -0.75f, 0.35f);
+            // Height trim moves the *stroke envelope*, never the HMD.
+            walkHeightTrim += (-ry * 0.24f + dpadVertical * 0.18f) * dt;
+            walkHeightTrim = std::clamp(walkHeightTrim, -0.40f, 0.25f);
 
-            // Cross/A = a simultaneous two-arm floor push. The stick direction
-            // selects the desired jump direction. Centered LS gives a vertical
-            // shove. The game, not KeyboardVR, decides the resulting body motion.
             if (south && !prevSouth) {
-                walkJumpTimer = 0.30f;
+                walkJumpTimer = 0.36f;
             }
 
-            // Circle/B = manual tag reach with the selected hand.
             if (east && !prevEast) {
                 tagLungeLeft = s.activeTarget == keyboardvr::ActiveTarget::Left;
                 tagLungeTimer = 0.24f;
@@ -506,85 +545,139 @@ $updateReplacement = @'
             prevSouth = south;
             prevEast = east;
 
-            constexpr float kJumpDuration = 0.30f;
+            constexpr float kTwoPi = kPi * 2.0f;
+            constexpr float kJumpDuration = 0.36f;
             constexpr float kTagLungeDuration = 0.24f;
 
-            float leftForward = 0.0f;
-            float leftRight = 0.0f;
-            float leftUp = walkHeightTrim;
-            float rightForward = 0.0f;
-            float rightRight = 0.0f;
-            float rightUp = walkHeightTrim;
+            LocalOffset leftTarget{};
+            LocalOffset rightTarget{};
+            leftTarget.up = walkHeightTrim;
+            rightTarget.up = walkHeightTrim;
 
             if (walkJumpTimer > 0.0f) {
-                // Both hands dive downward and opposite the requested travel
-                // direction. On a floor contact, that is the kind of relative
-                // hand motion Gorilla Tag can turn into a jump/push.
+                // A jump is still a two-hand push, but much less violent.
+                // Ease in/out so the collision system sees a coherent stroke.
                 const float progress =
                     1.0f - std::clamp(walkJumpTimer / kJumpDuration, 0.0f, 1.0f);
                 const float pulse = std::sin(progress * kPi);
-                const float jumpReach = sprinting ? 0.80f : 0.62f;
-                const float jumpDown = sprinting ? 1.20f : 1.05f;
+                const float jumpReach = sprinting ? 0.38f : 0.30f;
+                const float jumpDown = sprinting ? 0.80f : 0.68f;
 
-                leftForward  += -intentForward * jumpReach * pulse;
-                rightForward += -intentForward * jumpReach * pulse;
-                leftRight    += -intentRight * jumpReach * pulse;
-                rightRight   += -intentRight * jumpReach * pulse;
-                leftUp       += -jumpDown * pulse;
-                rightUp      += -jumpDown * pulse;
+                leftTarget.forward =
+                    -intentForward * jumpReach * walkMagnitude * pulse;
+                rightTarget.forward = leftTarget.forward;
+                leftTarget.right =
+                    -intentRight * jumpReach * walkMagnitude * pulse;
+                rightTarget.right = leftTarget.right;
+                leftTarget.up += -jumpDown * pulse;
+                rightTarget.up += -jumpDown * pulse;
 
                 walkJumpTimer = std::max(0.0f, walkJumpTimer - dt);
             }
-            else if (walkMagnitude > 0.01f) {
-                // Alternating ground strokes:
-                // contact half-cycle = down + opposite requested movement;
-                // recovery half-cycle = up + forward into the next stroke.
-                const float strokeScale = sprinting ? 0.72f : 0.52f;
-                const float downReach = sprinting ? 1.08f : 0.92f;
-                const float recoveryLift = sprinting ? 0.20f : 0.14f;
+            else if (walkMagnitude > 0.035f) {
+                const float strokeReach = sprinting ? 0.34f : 0.25f;
+                const float recoveryReach = sprinting ? 0.20f : 0.15f;
+                const float contactDrop = sprinting ? 0.72f : 0.62f;
+                const float recoveryLift = sprinting ? 0.16f : 0.12f;
 
-                const float leftWave = std::sin(walkPhase);
-                const float rightWave = -leftWave;
-
-                auto ApplyStroke = [&](float wave, float& fwd, float& right, float& up) {
-                    const float contact = std::max(0.0f, wave);
-                    const float recovery = std::max(0.0f, -wave);
-
-                    fwd += -intentForward * strokeScale * walkMagnitude * contact;
-                    right += -intentRight * strokeScale * walkMagnitude * contact;
-                    up += -downReach * walkMagnitude * contact;
-
-                    // Recover the hand forward/up without trying to propel.
-                    fwd += intentForward * 0.26f * walkMagnitude * recovery;
-                    right += intentRight * 0.26f * walkMagnitude * recovery;
-                    up += recoveryLift * walkMagnitude * recovery;
+                auto SmoothStep = [](float t) {
+                    t = std::clamp(t, 0.0f, 1.0f);
+                    return t * t * (3.0f - 2.0f * t);
                 };
 
-                ApplyStroke(leftWave, leftForward, leftRight, leftUp);
-                ApplyStroke(rightWave, rightForward, rightRight, rightUp);
+                auto BuildHandTarget = [&](float phase, LocalOffset& out) {
+                    float normalized = std::fmod(phase, kTwoPi) / kTwoPi;
+                    if (normalized < 0.0f) normalized += 1.0f;
+
+                    LocalOffset recovery{};
+                    recovery.forward =
+                        intentForward * recoveryReach * walkMagnitude;
+                    recovery.right =
+                        intentRight * recoveryReach * walkMagnitude;
+                    recovery.up =
+                        walkHeightTrim + recoveryLift * walkMagnitude;
+
+                    LocalOffset plant{};
+                    plant.forward =
+                        -intentForward * strokeReach * walkMagnitude;
+                    plant.right =
+                        -intentRight * strokeReach * walkMagnitude;
+                    plant.up =
+                        walkHeightTrim - contactDrop * walkMagnitude;
+
+                    // About 58% of each hand's cycle is the controlled move
+                    // toward/through contact; the rest is a curved recovery.
+                    if (normalized < 0.58f) {
+                        const float t = SmoothStep(normalized / 0.58f);
+                        out.forward =
+                            recovery.forward + (plant.forward - recovery.forward) * t;
+                        out.right =
+                            recovery.right + (plant.right - recovery.right) * t;
+                        out.up =
+                            recovery.up + (plant.up - recovery.up) * t;
+                    } else {
+                        const float t =
+                            SmoothStep((normalized - 0.58f) / 0.42f);
+                        out.forward =
+                            plant.forward + (recovery.forward - plant.forward) * t;
+                        out.right =
+                            plant.right + (recovery.right - plant.right) * t;
+                        out.up =
+                            plant.up + (recovery.up - plant.up) * t;
+
+                        // WalkSim-like recovery arc: lift away from contact
+                        // instead of dragging the hand straight back.
+                        out.up +=
+                            std::sin(t * kPi) * recoveryLift * walkMagnitude;
+                    }
+                };
+
+                BuildHandTarget(walkPhase, leftTarget);
+                BuildHandTarget(walkPhase + kPi, rightTarget);
             }
 
-            // Tag lunge layers on top of the current gait/jump pose.
+            // Tag reach is layered on top but kept smaller than Legacy mode.
             if (tagLungeTimer > 0.0f) {
                 const float progress =
                     1.0f - std::clamp(tagLungeTimer / kTagLungeDuration, 0.0f, 1.0f);
-                const float reach = std::sin(progress * kPi) * 0.58f;
-                if (tagLungeLeft) leftForward += reach;
-                else rightForward += reach;
+                const float reach = std::sin(progress * kPi) * 0.46f;
+                if (tagLungeLeft) leftTarget.forward += reach;
+                else rightTarget.forward += reach;
                 tagLungeTimer = std::max(0.0f, tagLungeTimer - dt);
             }
 
-            SetHandFromHeadLocal(
-                s.left, s.hmd, walkLeftBase,
-                leftForward, leftRight, leftUp
+            // Match the public WalkSim hand-driver idea of following target
+            // positions over time rather than teleporting. Clamp the total
+            // offset so a bad input never throws a hand absurdly far away.
+            ClampLocalOffset(leftTarget, 0.88f);
+            ClampLocalOffset(rightTarget, 0.88f);
+
+            const float followResponse = sprinting ? 10.0f : 8.0f;
+            SmoothLocalOffset(
+                walkLeftSmooth, leftTarget, dt, followResponse
             );
-            SetHandFromHeadLocal(
-                s.right, s.hmd, walkRightBase,
-                rightForward, rightRight, rightUp
+            SmoothLocalOffset(
+                walkRightSmooth, rightTarget, dt, followResponse
             );
 
-            // WalkSim consumes all locomotion axes/buttons it uses. The HMD is
-            // untouched here: no fake translation, jump arc, crouch, or snap turn.
+            SetHandFromHeadLocal(
+                s.left,
+                s.hmd,
+                walkLeftBase,
+                walkLeftSmooth.forward,
+                walkLeftSmooth.right,
+                walkLeftSmooth.up
+            );
+            SetHandFromHeadLocal(
+                s.right,
+                s.hmd,
+                walkRightBase,
+                walkRightSmooth.forward,
+                walkRightSmooth.right,
+                walkRightSmooth.up
+            );
+
+            // Modern WalkSim only synthesizes hand poses.
             s.leftInput.joyX = 0.0f;
             s.leftInput.joyY = 0.0f;
             s.rightInput.joyX = 0.0f;
@@ -882,7 +975,7 @@ Replace-Required @'
     std::printf("SnapTo: sticks=absolute X/Z | L2/R2=analog hand height (squeeze=lower)  \n");
     std::printf("         hold Triangle for absolute X/Y positioning too                  \n");
     std::printf("WalkSim: ARM-ONLY | R3 toggles cursed LEGACY WALK mode                    \n");
-    std::printf("Modern: LS strokes | L3 sprint-strokes | Cross push-jump | Circle tag     \n");
+    std::printf("Modern: smooth alternating LS strokes | L3 sprint | Cross push | Circle tag\n");
     std::printf("Legacy: LS body move | RS turn/height | L3 sprint | Cross jump | tag punch\n");
     std::printf("Computer: LS cursor | L2/R2 depth | Cross poke | Triangle hand | Circle exit\n");
     std::printf("          D-pad fine move | L1 precision | R1 fast | L1+R1+Square full reset\n");
@@ -905,4 +998,4 @@ Replace-Required @'
 '@ "visualizer mode status"
 
 [IO.File]::WriteAllText($controller, $text)
-Write-Host "Applied KeyboardVR v3.7 controller-only GTAG computer helper patch."
+Write-Host "Applied KeyboardVR v3.8 smooth WalkSim gait patch."
