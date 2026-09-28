@@ -48,7 +48,8 @@ enum class GamepadPoseMode {
     Velocity,
     SnapTo,
     GtagWalkSim,
-    LegacyWalkSim
+    LegacyWalkSim,
+    GtagComputer
 };
 
 GamepadPoseMode g_gamepadPoseMode = GamepadPoseMode::Velocity;
@@ -145,6 +146,8 @@ Replace-Required @'
     bool prevSouth = false;
     bool prevEast = false;
     bool prevR3 = false;
+    bool prevNorth = false;
+    bool prevTouchpadButton = false;
     bool snapBaseValid = false;
     bool walkBaseValid = false;
     LocalOffset snapLeftBase{};
@@ -161,6 +164,19 @@ Replace-Required @'
     bool tagLungeLeft = false;
     float walkJumpTimer = 0.0f;
     float walkHeightTrim = 0.0f;
+
+    GamepadPoseMode modeBeforeComputer = GamepadPoseMode::Velocity;
+    float computerCursorX = 0.0f;
+    float computerCursorY = 0.0f;
+    float computerDepth = 0.0f;
+    float computerTapTimer = 0.0f;
+
+    void ResetComputerCursor() {
+        computerCursorX = 0.0f;
+        computerCursorY = 0.0f;
+        computerDepth = 0.0f;
+        computerTapTimer = 0.0f;
+    }
 
     void CaptureSnapBase(const keyboardvr::SharedState& s) {
         snapLeftBase = ToHeadLocal(s.hmd, s.left);
@@ -215,6 +231,15 @@ Replace-Required @'
                 AlignControllersToHead(s);
                 CaptureWalkBase(s);
                 break;
+            case GamepadPoseMode::GtagComputer:
+                g_gamepadModeName = "GTAG COMPUTER";
+                s.leftInput = {};
+                s.rightInput = {};
+                s.activeTarget = keyboardvr::ActiveTarget::Right;
+                RecenterHandsAroundCurrentHead(s);
+                AlignControllersToHead(s);
+                ResetComputerCursor();
+                break;
         }
     }
 '@ "GamepadBridge mode fields"
@@ -245,6 +270,9 @@ $updateReplacement = @'
         const bool south = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_SOUTH);
         const bool east = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_EAST);
         const bool r3 = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        const bool touchpadButton = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_TOUCHPAD);
+        const bool leftShoulder = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+        const bool rightShoulder = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
         const bool sprinting = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
 
         // Create/Back toggles absolute SnapTo hand positioning.
@@ -278,11 +306,30 @@ $updateReplacement = @'
             }
         }
 
-        g_verticalStickMode = north;
+        // Touchpad click toggles a GTAG in-world-computer helper. This is
+        // pose-based typing: the controller moves a virtual hand over the
+        // physical keyboard/buttons in the VR world and Cross/A pokes them.
+        if (touchpadButton && !prevTouchpadButton) {
+            if (g_gamepadPoseMode == GamepadPoseMode::GtagComputer) {
+                SetMode(modeBeforeComputer, s);
+            } else {
+                modeBeforeComputer = g_gamepadPoseMode;
+                SetMode(GamepadPoseMode::GtagComputer, s);
+            }
+        }
+
+        // Fully controller-only emergency reset: L1 + R1 + Square.
+        if (west && !prevWest && leftShoulder && rightShoulder) {
+            s = keyboardvr::DefaultState();
+            SetMode(GamepadPoseMode::Velocity, s);
+        }
+
+        g_verticalStickMode =
+            g_gamepadPoseMode != GamepadPoseMode::GtagComputer && north;
 
         // Square/X recaptures anchors. In normal mode it recenters the hands
         // around the current HMD without moving the head.
-        if (west && !prevWest) {
+        if (west && !prevWest && !(leftShoulder && rightShoulder)) {
             if (g_gamepadPoseMode == GamepadPoseMode::SnapTo) {
                 CaptureSnapBase(s);
             } else if (
@@ -292,25 +339,52 @@ $updateReplacement = @'
                 RecenterHandsAroundCurrentHead(s);
                 AlignControllersToHead(s);
                 CaptureWalkBase(s);
+            } else if (g_gamepadPoseMode == GamepadPoseMode::GtagComputer) {
+                ResetComputerCursor();
             } else {
                 RecenterHandsAroundCurrentHead(s);
             }
+        }
+
+        // In computer mode Triangle/Y swaps the typing hand.
+        if (
+            g_gamepadPoseMode == GamepadPoseMode::GtagComputer &&
+            north && !prevNorth
+        ) {
+            s.activeTarget =
+                s.activeTarget == keyboardvr::ActiveTarget::Left
+                    ? keyboardvr::ActiveTarget::Right
+                    : keyboardvr::ActiveTarget::Left;
+            ResetComputerCursor();
         }
 
         prevBack = back;
         prevStart = start;
         prevWest = west;
         prevR3 = r3;
+        prevNorth = north;
+        prevTouchpadButton = touchpadButton;
 
         const float dpadVertical =
             (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_UP) ? 1.0f : 0.0f)
           - (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? 1.0f : 0.0f);
 
-        if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) {
-            s.activeTarget = keyboardvr::ActiveTarget::Left;
-        }
-        if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
-            s.activeTarget = keyboardvr::ActiveTarget::Right;
+        if (g_gamepadPoseMode == GamepadPoseMode::GtagComputer) {
+            constexpr float kComputerDpadSpeed = 0.18f;
+            if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) {
+                computerCursorX -= kComputerDpadSpeed * dt;
+            }
+            if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
+                computerCursorX += kComputerDpadSpeed * dt;
+            }
+            computerCursorY += dpadVertical * kComputerDpadSpeed * dt;
+        } else {
+            if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT)) {
+                s.activeTarget = keyboardvr::ActiveTarget::Left;
+            }
+            if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
+                s.activeTarget = keyboardvr::ActiveTarget::Right;
+            }
         }
 
         if (g_gamepadPoseMode == GamepadPoseMode::Velocity) {
@@ -517,7 +591,7 @@ $updateReplacement = @'
             s.rightInput.joyY = 0.0f;
         }
 
-        else {
+        else if (g_gamepadPoseMode == GamepadPoseMode::LegacyWalkSim) {
             // LEGACY WALKSim — intentionally ridiculous.
             // This is the old joystick-locomotion version kept as a joke mode:
             // it directly translates the virtual HMD/body, runs a fake jump arc,
@@ -629,6 +703,87 @@ $updateReplacement = @'
             s.rightInput.joyY = 0.0f;
         }
 
+        else {
+            // GTAG COMPUTER is a precision pose helper for Gorilla Tag's
+            // in-world computer/keyboard. It never sends OS keystrokes.
+            //
+            // Look at the computer, use LS to move the selected hand across
+            // the keyboard plane, triggers to adjust depth, and Cross/A to
+            // perform a short poke through a key/button.
+            constexpr float kComputerBaseForward = 0.62f;
+            constexpr float kComputerBaseUp = -0.27f;
+            constexpr float kComputerHandSide = 0.20f;
+            constexpr float kComputerCursorSpeed = 0.42f;
+            constexpr float kComputerDepthSpeed = 0.38f;
+            constexpr float kComputerTapDuration = 0.16f;
+            constexpr float kComputerTapReach = 0.16f;
+
+            const float precision =
+                leftShoulder ? 0.28f : (rightShoulder ? 1.80f : 1.0f);
+
+            computerCursorX += lx * kComputerCursorSpeed * precision * dt;
+            computerCursorY += -ly * kComputerCursorSpeed * precision * dt;
+            computerDepth += (rt - lt) * kComputerDepthSpeed * precision * dt;
+
+            computerCursorX = std::clamp(computerCursorX, -0.50f, 0.50f);
+            computerCursorY = std::clamp(computerCursorY, -0.38f, 0.38f);
+            computerDepth = std::clamp(computerDepth, -0.30f, 0.30f);
+
+            if (south && !prevSouth) {
+                computerTapTimer = kComputerTapDuration;
+            }
+
+            // Circle/B exits quickly without reaching for the touchpad.
+            if (east && !prevEast) {
+                SetMode(modeBeforeComputer, s);
+            }
+
+            float poke = 0.0f;
+            if (computerTapTimer > 0.0f) {
+                const float progress =
+                    1.0f - std::clamp(
+                        computerTapTimer / kComputerTapDuration,
+                        0.0f,
+                        1.0f
+                    );
+                poke = std::sin(progress * kPi) * kComputerTapReach;
+                computerTapTimer = std::max(0.0f, computerTapTimer - dt);
+            }
+
+            const bool useLeft =
+                s.activeTarget == keyboardvr::ActiveTarget::Left;
+            LocalOffset typingBase{};
+            typingBase.forward = kComputerBaseForward;
+            typingBase.right = useLeft ? -kComputerHandSide : kComputerHandSide;
+            typingBase.up = kComputerBaseUp;
+
+            auto& typingHand = useLeft ? s.left : s.right;
+            SetHandFromHeadLocal(
+                typingHand,
+                s.hmd,
+                typingBase,
+                computerDepth + poke,
+                computerCursorX,
+                computerCursorY
+            );
+
+            // Park the unused hand at its normal neutral position.
+            const auto d = keyboardvr::DefaultState();
+            const LocalOffset idleBase = useLeft
+                ? ToHeadLocal(d.hmd, d.right)
+                : ToHeadLocal(d.hmd, d.left);
+            auto& idleHand = useLeft ? s.right : s.left;
+            SetHandFromHeadLocal(idleHand, s.hmd, idleBase);
+
+            // Computer mode consumes pose controls; don't leak them into game
+            // thumbsticks/triggers while trying to type.
+            s.leftInput = {};
+            s.rightInput = {};
+
+            prevSouth = south;
+            prevEast = east;
+        }
+
         // Keep controller direction synchronized with head direction in every
         // physical-gamepad pose mode. This prevents hands from being in the
         // correct place while still pointing along an old world-space rotation.
@@ -636,24 +791,30 @@ $updateReplacement = @'
 
         // In SnapTo, analog triggers are dedicated hand-height controls.
         // In the other modes they remain normal VR trigger inputs.
-        if (g_gamepadPoseMode != GamepadPoseMode::SnapTo) {
+        if (
+            g_gamepadPoseMode != GamepadPoseMode::SnapTo &&
+            g_gamepadPoseMode != GamepadPoseMode::GtagComputer
+        ) {
             s.leftInput.trigger = std::max(s.leftInput.trigger, lt);
             s.rightInput.trigger = std::max(s.rightInput.trigger, rt);
             if (lt > 0.80f) s.leftInput.buttons |= keyboardvr::Button_Trigger;
             if (rt > 0.80f) s.rightInput.buttons |= keyboardvr::Button_Trigger;
         }
 
-        if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) {
-            s.leftInput.grip = 1.0f;
-            s.leftInput.buttons |= keyboardvr::Button_Grip;
-        }
-        if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) {
-            s.rightInput.grip = 1.0f;
-            s.rightInput.buttons |= keyboardvr::Button_Grip;
+        if (g_gamepadPoseMode != GamepadPoseMode::GtagComputer) {
+            if (leftShoulder) {
+                s.leftInput.grip = 1.0f;
+                s.leftInput.buttons |= keyboardvr::Button_Grip;
+            }
+            if (rightShoulder) {
+                s.rightInput.grip = 1.0f;
+                s.rightInput.buttons |= keyboardvr::Button_Grip;
+            }
         }
         if (
             g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim &&
             g_gamepadPoseMode != GamepadPoseMode::LegacyWalkSim &&
+            g_gamepadPoseMode != GamepadPoseMode::GtagComputer &&
             SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK)
         ) {
             s.leftInput.buttons |= keyboardvr::Button_Joystick;
@@ -661,6 +822,7 @@ $updateReplacement = @'
         if (
             g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim &&
             g_gamepadPoseMode != GamepadPoseMode::LegacyWalkSim &&
+            g_gamepadPoseMode != GamepadPoseMode::GtagComputer &&
             SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK)
         ) {
             s.rightInput.buttons |= keyboardvr::Button_Joystick;
@@ -668,7 +830,8 @@ $updateReplacement = @'
 
         if (
             g_gamepadPoseMode != GamepadPoseMode::GtagWalkSim &&
-            g_gamepadPoseMode != GamepadPoseMode::LegacyWalkSim
+            g_gamepadPoseMode != GamepadPoseMode::LegacyWalkSim &&
+            g_gamepadPoseMode != GamepadPoseMode::GtagComputer
         ) {
             MergeSelectedFaceButtons(pad, s);
         }
@@ -714,13 +877,15 @@ Replace-Required @'
 Replace-Required @'
     std::printf("Gamepad: LS=left hand X/Z | RS=right hand X/Z | D-pad up/down=selected Y\n");
 '@ @'
-    std::printf("Gamepad: Create=SnapTo | Options=GTAG WalkSim | modes reset hand anchors \n");
+    std::printf("Gamepad: Create=SnapTo | Options=WalkSim | touchpad click=GTAG COMPUTER \n");
     std::printf("Normal: LS/RS hands X/Z | hold Triangle for analog X/Y + up/down         \n");
     std::printf("SnapTo: sticks=absolute X/Z | L2/R2=analog hand height (squeeze=lower)  \n");
     std::printf("         hold Triangle for absolute X/Y positioning too                  \n");
     std::printf("WalkSim: ARM-ONLY | R3 toggles cursed LEGACY WALK mode                    \n");
     std::printf("Modern: LS strokes | L3 sprint-strokes | Cross push-jump | Circle tag     \n");
     std::printf("Legacy: LS body move | RS turn/height | L3 sprint | Cross jump | tag punch\n");
+    std::printf("Computer: LS cursor | L2/R2 depth | Cross poke | Triangle hand | Circle exit\n");
+    std::printf("          D-pad fine move | L1 precision | R1 fast | L1+R1+Square full reset\n");
 '@ "console gamepad movement help"
 
 Replace-Required @'
@@ -740,4 +905,4 @@ Replace-Required @'
 '@ "visualizer mode status"
 
 [IO.File]::WriteAllText($controller, $text)
-Write-Host "Applied KeyboardVR v3.6 modern + legacy WalkSim patch."
+Write-Host "Applied KeyboardVR v3.7 controller-only GTAG computer helper patch."

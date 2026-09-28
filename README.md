@@ -1,10 +1,10 @@
-# KeyboardVR v3.6
+# KeyboardVR v3.7
 
 KeyboardVR is a Windows SteamVR virtual-device driver and desktop control bridge for using VR software without a physical VR headset.
 
 It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/mouse control, and supports real gamepads through SDL3 including PS5 DualSense touchpad head-look.
 
-## v3.6 highlights
+## v3.7 highlights
 
 - **Yaw/anchor fixes**
   - hand positions now use the same OpenVR +Y yaw convention as the HMD quaternion
@@ -13,6 +13,23 @@ It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/
   - entering GTAG WalkSim does the same reset before its gait/jump/tag simulation starts
   - switching directly between SnapTo and WalkSim also gets a clean hand reset
 
+
+- **GTAG Computer mode — no PC keyboard required**
+  - touchpad click toggles the helper on/off
+  - designed for Gorilla Tag's physical in-world computer/keyboard rather than sending Windows keystrokes
+  - selected virtual hand is parked in a stable typing pose in front of the HMD
+  - left stick moves across the keyboard plane
+  - L2/R2 move the hand backward/forward in depth
+  - Cross/A performs a short forward key/button poke
+  - Triangle/Y swaps left/right typing hand
+  - D-pad gives fine cursor movement
+  - L1 = precision movement; R1 = faster movement
+  - Square/X recenters the typing cursor
+  - Circle/B exits back to the mode you were previously using
+- **Controller-only recovery**
+  - L1 + R1 + Square/X resets the whole virtual rig and returns to Velocity mode
+  - normal D-pad left/right still selects hands outside GTAG Computer mode
+  - touchpad drag continues to control head look
 
 - **Dual WalkSim modes**
   - Options/Start enters/exits WalkSim
@@ -71,7 +88,7 @@ It exposes a virtual HMD plus left/right tracked controllers, supports keyboard/
 
 ## Install the prebuilt Windows release
 
-1. Extract `KeyboardVR-v3.6-Windows-x64.zip`.
+1. Extract `KeyboardVR-v3.7-Windows-x64.zip`.
 2. Fully close SteamVR.
 3. Double-click `Install Driver.bat`.
 4. Run `KeyboardVR.exe`.
